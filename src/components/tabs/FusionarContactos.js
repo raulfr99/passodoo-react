@@ -109,13 +109,13 @@ export default function FusionarContactos() {
       const wizardId = await odooCallKw({
         model: 'base.partner.merge.automatic.wizard',
         method: 'create',
-        args: [[{ partner_ids: [[6, 0, allIds]], dst_partner_id: primaryId }]],
+        args: [{ partner_ids: [[6, 0, allIds]], dst_partner_id: primaryId }],
       });
 
       await odooCallKw({
         model: 'base.partner.merge.automatic.wizard',
         method: 'action_merge',
-        args: [[[wizardId]]],
+        args: [[wizardId]],
       });
 
       const primary = selectedContacts.find(c => c.id === primaryId);
