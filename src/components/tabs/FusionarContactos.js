@@ -185,9 +185,18 @@ export default function FusionarContactos() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-gray-800 truncate">{contact.name || 'Sin nombre'}</div>
                     <div className="text-xs text-gray-500 truncate">{contact.email || 'Sin email'}</div>
-                    <div className="flex gap-1 mt-1">
-                      <span className="bg-green-100 text-green-700 text-xs px-1.5 py-0.5 rounded-full">V:{contact.sales_count}</span>
-                      <span className="bg-blue-100 text-blue-700 text-xs px-1.5 py-0.5 rounded-full">S:{contact.subscriptions_count}</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <span className="inline-flex items-center gap-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/></svg>
+                        {contact.sales_count || 0}
+                      </span>
+                      <span className="inline-flex items-center gap-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/></svg>
+                        {contact.subscriptions_count || 0}
+                      </span>
+                      <span className="bg-gray-400 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        {contact.type || 'contact'}
+                      </span>
                     </div>
                   </div>
                   <span className="text-xs text-gray-400">#{contact.id}</span>
@@ -215,9 +224,22 @@ export default function FusionarContactos() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{c.name}</div>
                     <div className="text-xs text-gray-500 truncate">{c.email}</div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <span className="inline-flex items-center gap-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/></svg>
+                        {c.sales_count || 0}
+                      </span>
+                      <span className="inline-flex items-center gap-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/></svg>
+                        {c.subscriptions_count || 0}
+                      </span>
+                      <span className="bg-gray-400 text-white text-xs px-1.5 py-0.5 rounded-full">
+                        {c.type || 'contact'}
+                      </span>
+                    </div>
                   </div>
                   {primaryId === c.id && (
-                    <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full">Principal</span>
+                    <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full flex-shrink-0">Principal</span>
                   )}
                 </div>
               ))}
