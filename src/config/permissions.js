@@ -47,7 +47,7 @@ export function getUserRole(email) {
 }
 
 export const TAB_PERMISSIONS = {
-  admin: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc'],
+  admin: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc', 'clientes'],
   contacts: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc'],
   inpc: ['inpc'],
   consulta: ['consulta', 'cambiar', 'crear'],
