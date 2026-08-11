@@ -46,6 +46,15 @@ export function getUserRole(email) {
   return null;
 }
 
+export const CLIENTES_ALLOWED_EMAILS = [
+  'racosta@idconline.mx',
+  'venta_online@idconline.mx',
+  'floridalma.arreola@idconline.mx',
+  'asilva@idconline.mx',
+  'jonatan.ramos@idconline.mx',
+  'raul.flores@idconline.mx',
+];
+
 export const TAB_PERMISSIONS = {
   admin: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc', 'clientes'],
   contacts: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc'],

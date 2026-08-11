@@ -146,9 +146,9 @@ function EditModal({ cliente, onClose, onSaved }) {
         </div>
 
         <div className="px-6 pt-3 flex-shrink-0">
-          <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-500 break-all">
-            <span className="text-gray-400">Llave única: </span>
-            {cliente.llaveUnica}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 break-all">
+            <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-1">Llave única</p>
+            <p className="text-sm font-mono font-bold text-blue-800">{cliente.llaveUnica}</p>
           </div>
         </div>
 
@@ -157,7 +157,18 @@ function EditModal({ cliente, onClose, onSaved }) {
             <SectionTitle>Identificación</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <Field label="NIP">
-                <input type="number" value={form.NIP} onChange={set('NIP')} className={INPUT_CLS} />
+                <input
+                  type="number"
+                  value={form.NIP}
+                  readOnly
+                  className={INPUT_CLS + ' bg-gray-50 text-gray-400 cursor-not-allowed'}
+                />
+              </Field>
+              <Field label="Status">
+                <select value={form.STATUS} onChange={set('STATUS')} className={INPUT_CLS + ' bg-white'}>
+                  <option value="1">Activo</option>
+                  <option value="0">Inactivo</option>
+                </select>
               </Field>
               <Field label="Núm. Suscripción">
                 <input type="text" value={form.NUMSUS} onChange={set('NUMSUS')} className={INPUT_CLS} />

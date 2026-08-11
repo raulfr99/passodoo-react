@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { TAB_PERMISSIONS } from '../config/permissions';
+import { TAB_PERMISSIONS, CLIENTES_ALLOWED_EMAILS } from '../config/permissions';
 import ConsultaPassword from './tabs/ConsultaPassword';
 import CambiarPassword from './tabs/CambiarPassword';
 import CrearUsuario from './tabs/CrearUsuario';
@@ -24,7 +24,10 @@ const ALL_TABS = [
 export default function Shell() {
   const { user, logout } = useAuth();
   const allowedTabs = TAB_PERMISSIONS[user?.role] || [];
-  const visibleTabs = ALL_TABS.filter(t => allowedTabs.includes(t.id));
+  const visibleTabs = ALL_TABS.filter(t => {
+    if (t.id === 'clientes') return CLIENTES_ALLOWED_EMAILS.includes(user?.email);
+    return allowedTabs.includes(t.id);
+  });
   const [activeTab, setActiveTab] = useState(visibleTabs[0]?.id || '');
 
   const ActiveComponent = visibleTabs.find(t => t.id === activeTab)?.component || null;
