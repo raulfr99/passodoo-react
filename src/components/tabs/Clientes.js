@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { buscarClientes, actualizarCliente, eliminarCliente } from '../../services/clientesApi';
+import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas } from '../../services/clientesApi';
 
 const INPUT_CLS =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition';
@@ -339,6 +339,138 @@ function DeleteModal({ cliente, onClose, onDeleted }) {
   );
 }
 
+function LlamadasModal({ cliente, onClose }) {
+  const [llamadas, setLlamadas] = useState([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    obtenerLlamadas(cliente.nip)
+      .then((data) => {
+        if (cancelled) return;
+        setLlamadas(data.data || []);
+        setCount(data.count ?? 0);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [cliente.nip]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 bg-black/50">
+      <div className="bg-white w-full sm:max-w-5xl flex flex-col h-[92dvh] sm:h-auto sm:max-h-[90vh] rounded-t-2xl sm:rounded-2xl shadow-2xl">
+
+        <div className="bg-indigo-600 rounded-t-2xl px-5 py-4 sm:px-6 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-white text-base leading-tight">Historial de llamadas</h3>
+              <p className="text-indigo-200 text-sm mt-0.5 truncate">{cliente.nombre}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="bg-indigo-500 border border-indigo-400 rounded-xl px-3 py-2 text-center min-w-[56px]">
+                <span className="block text-white font-bold text-lg leading-none">{cliente.nip}</span>
+                <span className="block text-indigo-200 text-xs leading-none mt-0.5">NIP</span>
+              </div>
+              {!loading && !error && (
+                <div className="bg-white/15 border border-white/25 rounded-xl px-3 py-2 text-center min-w-[56px]">
+                  <span className="block text-white font-bold text-lg leading-none">{count}</span>
+                  <span className="block text-indigo-200 text-xs leading-none mt-0.5">llamada{count !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+              <button
+                onClick={onClose}
+                className="text-white/70 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition ml-1"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 py-4 sm:px-6">
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
+              <Spinner />
+              <span className="text-sm">Cargando llamadas...</span>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="flex items-start gap-3 border border-red-200 bg-red-50 rounded-xl px-4 py-3 text-sm text-red-700">
+              <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span>{error}</span>
+            </div>
+          )}
+
+          {!loading && !error && llamadas.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+              <svg className="w-12 h-12 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+              <p className="text-sm">Este cliente no tiene llamadas registradas.</p>
+            </div>
+          )}
+
+          {!loading && !error && llamadas.length > 0 && (
+            <table className="w-full text-sm border-collapse table-fixed">
+              <colgroup>
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '32%' }} />
+                <col style={{ width: '18%' }} />
+              </colgroup>
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">NIP</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Usuario</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Nombre</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Tema</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Fecha y hora</th>
+                </tr>
+              </thead>
+              <tbody>
+                {llamadas.map((ll) => (
+                  <tr key={ll.id} className="border-b border-gray-100 hover:bg-indigo-50/50 transition-colors">
+                    <td className="py-3 px-3 text-sm font-mono font-bold text-indigo-700">{ll.nip}</td>
+                    <td className="py-3 px-3 text-sm font-medium text-gray-700 truncate">{ll.usuario}</td>
+                    <td className="py-3 px-3 text-sm text-gray-800">{ll.nombre}</td>
+                    <td className="py-3 px-3">
+                      <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full break-words">{ll.tema}</span>
+                    </td>
+                    <td className="py-3 px-3 text-sm">
+                      <span className="font-semibold text-gray-800">{ll.fecha}</span>
+                      <span className="text-gray-400 ml-1.5">{ll.hora}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="px-5 py-4 sm:px-6 border-t border-gray-100 flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Clientes() {
   const [filters, setFilters] = useState({ nip: '', nombre: '', empresa: '', ciudad: '', status: '' });
   const [results, setResults] = useState([]);
@@ -347,6 +479,7 @@ export default function Clientes() {
   const [alert, setAlert] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [llamadasTarget, setLlamadasTarget] = useState(null);
 
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
 
@@ -503,6 +636,12 @@ export default function Clientes() {
                     <td className="py-2.5 px-2 text-right">
                       <div className="flex gap-1.5 justify-end">
                         <button
+                          onClick={() => setLlamadasTarget(c)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap"
+                        >
+                          Ver llamadas
+                        </button>
+                        <button
                           onClick={() => setEditTarget(c)}
                           className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium transition whitespace-nowrap"
                         >
@@ -541,6 +680,13 @@ export default function Clientes() {
           cliente={deleteTarget}
           onClose={() => setDeleteTarget(null)}
           onDeleted={handleDeleted}
+        />
+      )}
+
+      {llamadasTarget && (
+        <LlamadasModal
+          cliente={llamadasTarget}
+          onClose={() => setLlamadasTarget(null)}
         />
       )}
     </div>

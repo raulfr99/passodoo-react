@@ -51,3 +51,14 @@ export async function eliminarCliente(llaveUnica) {
   if (!res.ok) throw new Error(getErrorMessage(res.status, data));
   return data;
 }
+
+export async function obtenerLlamadas(nip, limite = 100) {
+  const params = new URLSearchParams({ nip });
+  if (limite !== 100) params.append('limite', limite);
+  const res = await fetch(`${BASE_URL}/llamadas?${params.toString()}`, {
+    headers: getHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(getErrorMessage(res.status, data));
+  return data;
+}
