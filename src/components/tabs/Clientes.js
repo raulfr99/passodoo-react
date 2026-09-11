@@ -339,11 +339,35 @@ function DeleteModal({ cliente, onClose, onDeleted }) {
   );
 }
 
+function SortHeader({ children, sortKey, sort, onSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <th className="py-3 px-3">
+      <button
+        onClick={() => onSort(sortKey)}
+        className={`flex items-center gap-1 text-xs font-semibold uppercase tracking-wide transition select-none ${active ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+      >
+        {children}
+        <span className="flex flex-col gap-px ml-0.5">
+          <svg className={`w-2 h-1.5 ${active && sort.dir === 'asc' ? 'text-indigo-600' : 'text-gray-300'}`} viewBox="0 0 8 4" fill="currentColor">
+            <path d="M4 0L8 4H0z" />
+          </svg>
+          <svg className={`w-2 h-1.5 ${active && sort.dir === 'desc' ? 'text-indigo-600' : 'text-gray-300'}`} viewBox="0 0 8 4" fill="currentColor">
+            <path d="M4 4L0 0h8z" />
+          </svg>
+        </span>
+      </button>
+    </th>
+  );
+}
+
 function LlamadasModal({ cliente, onClose }) {
   const [llamadas, setLlamadas] = useState([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [filters, setFilters] = useState({ fecha: '', nombre: '', tema: '', numConsultas: '' });
+  const [sort, setSort] = useState({ key: 'fecha', dir: 'desc' });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -363,6 +387,54 @@ function LlamadasModal({ cliente, onClose }) {
     return () => { cancelled = true; };
   }, [cliente.nip]);
 
+  const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  const clearFilters = () => setFilters({ fecha: '', nombre: '', tema: '', numConsultas: '' });
+  const hasFilters = Object.values(filters).some((v) => v !== '');
+
+  const handleSort = (key) => {
+    setSort((s) => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
+
+  const displayed = useMemo(() => {
+    let list = [...llamadas];
+
+    if (filters.fecha) list = list.filter((ll) => ll.fecha === filters.fecha);
+    if (filters.nombre) {
+      const q = filters.nombre.toLowerCase();
+      list = list.filter((ll) => ll.nombre?.toLowerCase().includes(q));
+    }
+    if (filters.tema) {
+      const q = filters.tema.toLowerCase();
+      list = list.filter((ll) => ll.tema?.toLowerCase().includes(q));
+    }
+    if (filters.numConsultas !== '') {
+      const n = Number(filters.numConsultas);
+      list = list.filter((ll) => ll.numConsultas === n);
+    }
+
+    if (sort.key) {
+      list.sort((a, b) => {
+        let av, bv;
+        if (sort.key === 'fecha') {
+          av = `${a.fecha ?? ''}${a.hora ?? ''}`;
+          bv = `${b.fecha ?? ''}${b.hora ?? ''}`;
+        } else {
+          av = a[sort.key];
+          bv = b[sort.key];
+        }
+        if (typeof av === 'number' && typeof bv === 'number') {
+          return sort.dir === 'asc' ? av - bv : bv - av;
+        }
+        const cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'es', { numeric: true });
+        return sort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return list;
+  }, [llamadas, filters, sort]);
+
+  const FILTER_INPUT = 'w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 transition bg-white';
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6 bg-black/50">
       <div className="bg-white w-full sm:max-w-5xl flex flex-col h-[92dvh] sm:h-auto sm:max-h-[90vh] rounded-t-2xl sm:rounded-2xl shadow-2xl">
@@ -379,8 +451,10 @@ function LlamadasModal({ cliente, onClose }) {
                 <span className="block text-indigo-200 text-xs leading-none mt-0.5">NIP</span>
               </div>
               {!loading && !error && (
-                <div className="bg-white/15 border border-white/25 rounded-xl px-3 py-2 text-center min-w-[56px]">
-                  <span className="block text-white font-bold text-lg leading-none">{count}</span>
+                <div className="bg-white/15 border border-white/25 rounded-xl px-3 py-2 text-center min-w-[64px]">
+                  <span className="block text-white font-bold text-lg leading-none">
+                    {hasFilters ? <>{displayed.length}<span className="font-normal text-indigo-300 text-sm">/{count}</span></> : count}
+                  </span>
                   <span className="block text-indigo-200 text-xs leading-none mt-0.5">llamada{count !== 1 ? 's' : ''}</span>
                 </div>
               )}
@@ -393,6 +467,40 @@ function LlamadasModal({ cliente, onClose }) {
             </div>
           </div>
         </div>
+
+        {!loading && !error && llamadas.length > 0 && (
+          <div className="flex-shrink-0 px-5 py-3 sm:px-6 border-b border-gray-100 bg-gray-50/80">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Fecha</label>
+                <input type="date" value={filters.fecha} onChange={setFilter('fecha')} className={FILTER_INPUT} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Nombre</label>
+                <input type="text" value={filters.nombre} onChange={setFilter('nombre')} placeholder="Buscar..." className={FILTER_INPUT} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Tema</label>
+                <input type="text" value={filters.tema} onChange={setFilter('tema')} placeholder="Buscar..." className={FILTER_INPUT} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">No. Consultas</label>
+                <div className="flex gap-1">
+                  <input type="number" min="0" value={filters.numConsultas} onChange={setFilter('numConsultas')} placeholder="Exacto" className={FILTER_INPUT} />
+                  {hasFilters && (
+                    <button
+                      onClick={clearFilters}
+                      title="Limpiar filtros"
+                      className="flex-shrink-0 w-8 rounded-lg border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-200 transition text-sm font-medium"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-y-auto flex-1 px-5 py-4 sm:px-6">
           {loading && (
@@ -420,41 +528,56 @@ function LlamadasModal({ cliente, onClose }) {
             </div>
           )}
 
-          {!loading && !error && llamadas.length > 0 && (
-            <table className="w-full text-sm border-collapse table-fixed">
-              <colgroup>
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '28%' }} />
-                <col style={{ width: '32%' }} />
-                <col style={{ width: '18%' }} />
-              </colgroup>
-              <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">NIP</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Usuario</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Nombre</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Tema</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide py-3 px-3">Fecha y hora</th>
-                </tr>
-              </thead>
-              <tbody>
-                {llamadas.map((ll) => (
-                  <tr key={ll.id} className="border-b border-gray-100 hover:bg-indigo-50/50 transition-colors">
-                    <td className="py-3 px-3 text-sm font-mono font-bold text-indigo-700">{ll.nip}</td>
-                    <td className="py-3 px-3 text-sm font-medium text-gray-700 truncate">{ll.usuario}</td>
-                    <td className="py-3 px-3 text-sm text-gray-800">{ll.nombre}</td>
-                    <td className="py-3 px-3">
-                      <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full break-words">{ll.tema}</span>
-                    </td>
-                    <td className="py-3 px-3 text-sm">
-                      <span className="font-semibold text-gray-800">{ll.fecha}</span>
-                      <span className="text-gray-400 ml-1.5">{ll.hora}</span>
-                    </td>
+          {!loading && !error && llamadas.length > 0 && displayed.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+              <svg className="w-10 h-10 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
+              </svg>
+              <p className="text-sm">Sin resultados con los filtros actuales.</p>
+              <button onClick={clearFilters} className="mt-2 text-xs text-indigo-600 hover:underline">Limpiar filtros</button>
+            </div>
+          )}
+
+          {!loading && !error && displayed.length > 0 && (
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-sm border-collapse table-fixed min-w-[640px]">
+                <colgroup>
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '31%' }} />
+                  <col style={{ width: '18%' }} />
+                </colgroup>
+                <thead>
+                  <tr className="border-b-2 border-gray-200">
+                    <SortHeader sortKey="nip" sort={sort} onSort={handleSort}>NIP</SortHeader>
+                    <SortHeader sortKey="usuario" sort={sort} onSort={handleSort}>Usuario</SortHeader>
+                    <SortHeader sortKey="nombre" sort={sort} onSort={handleSort}>Nombre</SortHeader>
+                    <SortHeader sortKey="numConsultas" sort={sort} onSort={handleSort}>No. Consultas</SortHeader>
+                    <SortHeader sortKey="tema" sort={sort} onSort={handleSort}>Tema</SortHeader>
+                    <SortHeader sortKey="fecha" sort={sort} onSort={handleSort}>Fecha y hora</SortHeader>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {displayed.map((ll) => (
+                    <tr key={ll.id} className="border-b border-gray-100 hover:bg-indigo-50/50 transition-colors">
+                      <td className="py-3 px-3 text-sm font-mono font-bold text-indigo-700">{ll.nip}</td>
+                      <td className="py-3 px-3 text-sm font-medium text-gray-700 truncate">{ll.usuario}</td>
+                      <td className="py-3 px-3 text-sm text-gray-800">{ll.nombre}</td>
+                      <td className="py-3 px-3 text-sm font-semibold text-gray-700 text-center">{ll.numConsultas ?? '-'}</td>
+                      <td className="py-3 px-3">
+                        <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full break-words">{ll.tema}</span>
+                      </td>
+                      <td className="py-3 px-3 text-sm">
+                        <span className="font-semibold text-gray-800">{ll.fecha}</span>
+                        <span className="text-gray-400 ml-1.5">{ll.hora}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
