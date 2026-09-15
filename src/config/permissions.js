@@ -53,6 +53,8 @@ export const CLIENTES_ALLOWED_EMAILS = [
   'asilva@idconline.mx',
   'jonatan.ramos@idconline.mx',
   'raul.flores@idconline.mx',
+  'veronica.gonzalez@idconline.mx',
+  'karen.gonzalez@idconline.mx',
 ];
 
 export const TAB_PERMISSIONS = {
