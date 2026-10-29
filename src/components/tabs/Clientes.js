@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas } from '../../services/clientesApi';
+import React, { useState, useMemo, useEffect } from 'react';
+import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas, verificarNip, cambiarNip } from '../../services/clientesApi';
+import { useOdooRpc } from '../../hooks/useOdooRpc';
+import { registrarAccion, ENTORNO } from '../../services/historialService';
 
 const INPUT_CLS =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition';
@@ -91,7 +93,7 @@ function Field({ label, children }) {
   );
 }
 
-function EditModal({ cliente, onClose, onSaved }) {
+function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
   const initial = useMemo(() => buildForm(cliente), [cliente]);
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -124,8 +126,29 @@ function EditModal({ cliente, onClose, onSaved }) {
     try {
       const result = await actualizarCliente(cliente.llaveUnica, campos);
       const updated = Array.isArray(result.data) ? result.data[0] : result.data;
+      registrarAccion({
+        accion: 'EDITAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'EXITO',
+        detalle: {
+          llaveUnica: cliente.llaveUnica,
+          nip: cliente.nip,
+          camposModificados: campos,
+        },
+      });
       onSaved(updated);
     } catch (err) {
+      registrarAccion({
+        accion: 'EDITAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'ERROR',
+        detalle: {
+          llaveUnica: cliente.llaveUnica,
+          nip: cliente.nip,
+          camposIntentados: campos,
+          error: err.message,
+        },
+      });
       setError(err.message);
       setSaving(false);
     }
@@ -157,12 +180,23 @@ function EditModal({ cliente, onClose, onSaved }) {
             <SectionTitle>Identificación</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <Field label="NIP">
-                <input
-                  type="number"
-                  value={form.NIP}
-                  readOnly
-                  className={INPUT_CLS + ' bg-gray-50 text-gray-400 cursor-not-allowed'}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={form.NIP}
+                    readOnly
+                    className={INPUT_CLS + ' bg-gray-50 text-gray-400 cursor-not-allowed'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onGenerarNip && onGenerarNip(cliente)}
+                    disabled={saving}
+                    title="Generar un nuevo NIP automáticamente"
+                    className="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap disabled:opacity-50"
+                  >
+                    Generar nuevo NIP
+                  </button>
+                </div>
               </Field>
               <Field label="Status">
                 <select value={form.STATUS} onChange={set('STATUS')} className={INPUT_CLS + ' bg-white'}>
@@ -281,8 +315,30 @@ function DeleteModal({ cliente, onClose, onDeleted }) {
     setError(null);
     try {
       await eliminarCliente(cliente.llaveUnica);
+      registrarAccion({
+        accion: 'ELIMINAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'EXITO',
+        detalle: {
+          llaveUnica: cliente.llaveUnica,
+          nip: cliente.nip,
+          nombre: cliente.nombre,
+          empresa: cliente.empresa,
+          email: cliente.contactos?.email || null,
+        },
+      });
       onDeleted(cliente.llaveUnica);
     } catch (err) {
+      registrarAccion({
+        accion: 'ELIMINAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'ERROR',
+        detalle: {
+          llaveUnica: cliente.llaveUnica,
+          nip: cliente.nip,
+          error: err.message,
+        },
+      });
       setError(err.message);
       setDeleting(false);
     }
@@ -594,6 +650,428 @@ function LlamadasModal({ cliente, onClose }) {
   );
 }
 
+function generarNipAleatorio(exclude) {
+  const buf = new Uint32Array(1);
+  // 900000 valores posibles (100000..999999)
+  let g;
+  do {
+    crypto.getRandomValues(buf);
+    g = 100000 + (buf[0] % 900000);
+  } while (g === Number(exclude));
+  return g;
+}
+
+function GenerarNipModal({ cliente, onClose, onSuccess }) {
+  const { odooCall } = useOdooRpc();
+  const nipActual = Number(cliente.nip);
+
+  const [phase, setPhase] = useState('verifying');
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [nuevoNip, setNuevoNip] = useState(null);
+  const [intentos, setIntentos] = useState(0);
+  const [sqlPreview, setSqlPreview] = useState({ count: 0 });
+  const [odooPreview, setOdooPreview] = useState({ actualizar: [], excluidos: [], total: 0 });
+  const [sqlResult, setSqlResult] = useState(null);
+  const [odooActualizados, setOdooActualizados] = useState([]);
+
+  const buildExcluidos = (p) => {
+    const motivos = [];
+    if (!p.is_active_subscription) motivos.push('suscripción inactiva');
+    if ((p.subscription_count || 0) === 0) motivos.push('subscription_count = 0');
+    return { id: p.id, name: p.name, motivo: motivos.join(' / ') || 'no cumple regla' };
+  };
+
+  const verify = async () => {
+    setPhase('verifying');
+    setErrorMsg(null);
+    try {
+      let candidato = null;
+      let count = 0;
+      for (let i = 0; i < 10; i++) {
+        count++;
+        const g = generarNipAleatorio(nipActual);
+        const sqlCheck = await verificarNip(g);
+        if (sqlCheck.exists) continue;
+        const odooCheck = await odooCall({
+          model: 'res.partner',
+          method: 'search_read',
+          args: [[['nip_custom', '=', String(g)]], ['id'], 0],
+        });
+        if (odooCheck && odooCheck.length > 0) continue;
+        candidato = g;
+        break;
+      }
+      setIntentos(count);
+      if (!candidato) {
+        setErrorMsg('No se encontró un NIP único tras 10 intentos. Intenta de nuevo.');
+        setPhase('error');
+        return;
+      }
+      setNuevoNip(candidato);
+
+      const [sqlData, odooData] = await Promise.all([
+        verificarNip(nipActual).catch(() => ({ data: [] })),
+        odooCall({
+          model: 'res.partner',
+          method: 'search_read',
+          args: [
+            [['nip_custom', '=', String(nipActual)]],
+            ['id', 'nip_custom', 'subscription_count', 'is_company', 'is_active_subscription', 'name'],
+            0,
+          ],
+        }).catch(() => []),
+      ]);
+
+      const actualizar = [];
+      const excluidos = [];
+      (odooData || []).forEach((p) => {
+        if (p.is_active_subscription && (p.subscription_count || 0) > 0) {
+          actualizar.push({ id: p.id, name: p.name, is_company: p.is_company, subscription_count: p.subscription_count });
+        } else {
+          excluidos.push(buildExcluidos(p));
+        }
+      });
+
+      setSqlPreview({ count: (sqlData.data || []).length });
+      setOdooPreview({ actualizar, excluidos, total: (odooData || []).length });
+      setPhase('preview');
+    } catch (err) {
+      setErrorMsg(err.message);
+      setPhase('error');
+    }
+  };
+
+  useEffect(() => { verify(); /* eslint-disable-next-line */ }, []);
+
+  const sqlAfectados = (resp) =>
+    resp?.detalles?.registrosAfectados ?? resp?.registrosAfectados ?? resp?.data?.registrosAfectados ?? null;
+
+  const confirmar = async () => {
+    setPhase('confirming');
+    setErrorMsg(null);
+    try {
+      const sqlResp = await cambiarNip(nipActual, nuevoNip);
+      setSqlResult(sqlResp);
+      const ids = odooPreview.actualizar.map((p) => p.id);
+
+      const detalleBase = {
+        nipAnterior: nipActual,
+        nipNuevo: nuevoNip,
+        intentos,
+        registrosAfectadosSql: sqlAfectados(sqlResp),
+      };
+
+      if (ids.length === 0) {
+        registrarAccion({
+          accion: 'GENERAR_NIP',
+          modulo: 'NIPS',
+          resultado: 'EXITO',
+          detalle: {
+            ...detalleBase,
+            odoo: { actualizadosIds: [], excluidos: odooPreview.excluidos },
+          },
+        });
+        setOdooActualizados([]);
+        setPhase('success');
+        return;
+      }
+
+      setPhase('odooUpdating');
+      try {
+        await odooCall({
+          model: 'res.partner',
+          method: 'write',
+          args: [ids, { nip_custom: Number(nuevoNip) }],
+        });
+        setOdooActualizados(ids);
+        registrarAccion({
+          accion: 'GENERAR_NIP',
+          modulo: 'NIPS',
+          resultado: 'EXITO',
+          detalle: {
+            ...detalleBase,
+            odoo: { actualizadosIds: ids, excluidos: odooPreview.excluidos },
+          },
+        });
+        setPhase('success');
+      } catch (odooErr) {
+        registrarAccion({
+          accion: 'GENERAR_NIP',
+          modulo: 'NIPS',
+          resultado: 'PARCIAL',
+          detalle: {
+            ...detalleBase,
+            odoo: {
+              actualizadosIds: [],
+              pendientesIds: ids,
+              excluidos: odooPreview.excluidos,
+              error: odooErr.message,
+            },
+          },
+        });
+        setErrorMsg(odooErr.message);
+        setPhase('odooFailed');
+      }
+    } catch (sqlErr) {
+      registrarAccion({
+        accion: 'GENERAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'ERROR',
+        detalle: {
+          nipAnterior: nipActual,
+          nipNuevo: nuevoNip,
+          intentos,
+          error: sqlErr.message,
+        },
+      });
+      setErrorMsg(sqlErr.message);
+      setPhase('error');
+    }
+  };
+
+  const reintentarOdoo = async () => {
+    const ids = odooPreview.actualizar.map((p) => p.id);
+    if (ids.length === 0 || !nuevoNip) return;
+    setPhase('odooUpdating');
+    setErrorMsg(null);
+    try {
+      await odooCall({
+        model: 'res.partner',
+        method: 'write',
+        args: [ids, { nip_custom: Number(nuevoNip) }],
+      });
+      setOdooActualizados(ids);
+      registrarAccion({
+        accion: 'GENERAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'EXITO',
+        detalle: {
+          nipAnterior: nipActual,
+          nipNuevo: nuevoNip,
+          intentos,
+          registrosAfectadosSql: sqlAfectados(sqlResult),
+          odoo: { actualizadosIds: ids, excluidos: odooPreview.excluidos },
+          reintentoOdoo: true,
+        },
+      });
+      setPhase('success');
+    } catch (err) {
+      registrarAccion({
+        accion: 'GENERAR_NIP',
+        modulo: 'NIPS',
+        resultado: 'PARCIAL',
+        detalle: {
+          nipAnterior: nipActual,
+          nipNuevo: nuevoNip,
+          intentos,
+          registrosAfectadosSql: sqlAfectados(sqlResult),
+          odoo: { actualizadosIds: [], pendientesIds: ids, error: err.message },
+          reintentoOdoo: true,
+        },
+      });
+      setErrorMsg(err.message);
+      setPhase('odooFailed');
+    }
+  };
+
+  const busy = phase === 'verifying' || phase === 'confirming' || phase === 'odooUpdating';
+  const envBadge = ENTORNO === 'PROD'
+    ? 'bg-red-100 text-red-700 border-red-200'
+    : 'bg-amber-100 text-amber-700 border-amber-200';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        <div className="bg-indigo-600 rounded-t-2xl px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <h3 className="font-semibold text-white">Generar nuevo NIP</h3>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${envBadge}`}>{ENTORNO}</span>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {phase === 'verifying' && (
+            <div className="flex flex-col items-center justify-center py-8 gap-3 text-gray-500">
+              <Spinner />
+              <span className="text-sm">Verificando disponibilidad...</span>
+            </div>
+          )}
+
+          {phase === 'preview' && (
+            <>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Cambio propuesto</p>
+                <div className="flex items-center justify-center gap-3 font-mono text-xl font-bold text-gray-800">
+                  <span>{nipActual}</span>
+                  <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                  <span className="text-indigo-600">{nuevoNip}</span>
+                </div>
+                <p className="text-center text-xs text-gray-400 mt-2">Verificado tras {intentos} intento{intentos !== 1 ? 's' : ''}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide">SQL</p>
+                  <p className="text-blue-900 font-bold text-lg leading-tight">{sqlPreview.count}</p>
+                  <p className="text-xs text-blue-700">registro{sqlPreview.count !== 1 ? 's' : ''} a actualizar</p>
+                </div>
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wide">Odoo</p>
+                  <p className="text-indigo-900 font-bold text-lg leading-tight">{odooPreview.actualizar.length}</p>
+                  <p className="text-xs text-indigo-700">
+                    partner{odooPreview.actualizar.length !== 1 ? 's' : ''} a actualizar
+                    {odooPreview.excluidos.length > 0 && ` · ${odooPreview.excluidos.length} excluido${odooPreview.excluidos.length !== 1 ? 's' : ''}`}
+                  </p>
+                </div>
+              </div>
+
+              {odooPreview.total === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                  No se encontraron partners en Odoo con <code>nip_custom = {nipActual}</code>. Solo se actualizará SQL.
+                </div>
+              )}
+
+              {odooPreview.total > 0 && odooPreview.actualizar.length === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                  Ningún partner de Odoo cumple la regla (suscripción activa y subscription_count &gt; 0). Odoo no se actualizará.
+                </div>
+              )}
+            </>
+          )}
+
+          {phase === 'confirming' && (
+            <div className="flex flex-col items-center justify-center py-8 gap-3 text-gray-500">
+              <Spinner />
+              <span className="text-sm">Actualizando SQL...</span>
+            </div>
+          )}
+
+          {phase === 'odooUpdating' && (
+            <div className="flex flex-col items-center justify-center py-8 gap-3 text-gray-500">
+              <Spinner />
+              <span className="text-sm">Actualizando Odoo...</span>
+            </div>
+          )}
+
+          {phase === 'success' && (
+            <>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+                <p className="font-semibold mb-1">Cambio aplicado correctamente.</p>
+                <p className="text-xs">
+                  SQL: {sqlAfectados(sqlResult) ?? sqlPreview.count} registro(s) · Odoo: {odooActualizados.length} partner(s) actualizados
+                  {odooPreview.excluidos.length > 0 && ` · ${odooPreview.excluidos.length} excluidos`}
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-3 font-mono text-lg">
+                <span className="text-gray-500">{nipActual}</span>
+                <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+                <span className="font-bold text-green-700">{nuevoNip}</span>
+              </div>
+            </>
+          )}
+
+          {phase === 'odooFailed' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-2">
+              <p className="font-semibold">SQL actualizado, pero Odoo falló.</p>
+              <p className="text-xs">El NIP ya cambió en SQL ({sqlAfectados(sqlResult) ?? sqlPreview.count} registros). Puedes reintentar la actualización en Odoo.</p>
+              {errorMsg && <p className="text-xs font-mono bg-white/60 rounded px-2 py-1 break-all">{errorMsg}</p>}
+            </div>
+          )}
+
+          {phase === 'error' && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+              <p className="font-semibold mb-1">Error</p>
+              <p className="text-xs break-all">{errorMsg}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center gap-2 justify-end flex-shrink-0">
+          {phase === 'preview' && (
+            <>
+              <button
+                onClick={onClose}
+                disabled={busy}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={verify}
+                disabled={busy}
+                className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-sm font-medium transition disabled:opacity-50"
+              >
+                Generar otro
+              </button>
+              <button
+                onClick={confirmar}
+                disabled={busy}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-medium transition"
+              >
+                Confirmar cambio
+              </button>
+            </>
+          )}
+
+          {phase === 'error' && (
+            <>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={verify}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition"
+              >
+                Reintentar
+              </button>
+            </>
+          )}
+
+          {phase === 'odooFailed' && (
+            <>
+              <button
+                onClick={() => onSuccess({ nipAnterior: nipActual, nipNuevo: nuevoNip, parcial: true })}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={reintentarOdoo}
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition"
+              >
+                Reintentar actualizar Odoo
+              </button>
+            </>
+          )}
+
+          {phase === 'success' && (
+            <button
+              onClick={() => onSuccess({ nipAnterior: nipActual, nipNuevo: nuevoNip, parcial: false })}
+              className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition"
+            >
+              Listo
+            </button>
+          )}
+
+          {(phase === 'verifying' || phase === 'confirming' || phase === 'odooUpdating') && (
+            <button
+              disabled
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-400 cursor-not-allowed"
+            >
+              Procesando...
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Clientes() {
   const [filters, setFilters] = useState({ nip: '', nombre: '', empresa: '', ciudad: '', status: '' });
   const [results, setResults] = useState([]);
@@ -603,17 +1081,18 @@ export default function Clientes() {
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [llamadasTarget, setLlamadasTarget] = useState(null);
+  const [generarTarget, setGenerarTarget] = useState(null);
 
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
+  const doSearch = async (overrideFilters) => {
+    const effective = overrideFilters || filters;
     setLoading(true);
     setAlert(null);
     setResults([]);
     setSearched(false);
     try {
-      const data = await buscarClientes(filters);
+      const data = await buscarClientes(effective);
       const list = data.data || [];
       setResults(list);
       setSearched(true);
@@ -626,6 +1105,11 @@ export default function Clientes() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    doSearch();
   };
 
   const handleSaved = (updatedCliente) => {
@@ -642,6 +1126,29 @@ export default function Clientes() {
     setResults((prev) => prev.filter((c) => c.llaveUnica !== llaveUnica));
     setDeleteTarget(null);
     setAlert({ type: 'success', message: 'Cliente eliminado correctamente.' });
+  };
+
+  const handleGenerarRequest = (cliente) => {
+    setEditTarget(null);
+    setGenerarTarget(cliente);
+  };
+
+  const handleGenerarSuccess = ({ nipAnterior, nipNuevo, parcial }) => {
+    setGenerarTarget(null);
+    setAlert({
+      type: parcial ? 'error' : 'success',
+      message: parcial
+        ? `NIP ${nipAnterior} cambiado a ${nipNuevo} en SQL, pero la actualización en Odoo quedó pendiente.`
+        : `NIP ${nipAnterior} cambiado a ${nipNuevo} correctamente.`,
+    });
+    const nextFilters =
+      String(filters.nip) === String(nipAnterior)
+        ? { ...filters, nip: String(nipNuevo) }
+        : filters;
+    if (nextFilters !== filters) setFilters(nextFilters);
+    if (Object.values(nextFilters).some((v) => v !== '')) {
+      doSearch(nextFilters);
+    }
   };
 
   return (
@@ -795,6 +1302,15 @@ export default function Clientes() {
           cliente={editTarget}
           onClose={() => setEditTarget(null)}
           onSaved={handleSaved}
+          onGenerarNip={handleGenerarRequest}
+        />
+      )}
+
+      {generarTarget && (
+        <GenerarNipModal
+          cliente={generarTarget}
+          onClose={() => setGenerarTarget(null)}
+          onSuccess={handleGenerarSuccess}
         />
       )}
 

@@ -3,7 +3,10 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(npm run *)",
-      "Bash(grep -E \"\\\\.\\(env|json\\)$\")"
+      "Bash(grep -E \"\\\\.\\(env|json\\)$\")",
+      "Bash(npx eslint *)",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"require\\('@babel/parser'\\).parse\\(require\\('fs'\\).readFileSync\\('src/components/tabs/Clientes.js','utf8'\\),{sourceType:'module',plugins:['jsx']}\\); console.log\\('OK'\\);\")"
     ]
   }
 }

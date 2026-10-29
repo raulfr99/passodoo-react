@@ -52,6 +52,27 @@ export async function eliminarCliente(llaveUnica) {
   return data;
 }
 
+export async function verificarNip(nip) {
+  const res = await fetch(`${BASE_URL}/nips?nip=${encodeURIComponent(nip)}`, {
+    headers: getHeaders(),
+  });
+  if (res.status === 404) return { exists: false, data: [] };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(getErrorMessage(res.status, data));
+  return { exists: true, data: data.data || [] };
+}
+
+export async function cambiarNip(nipActual, nuevoNip) {
+  const res = await fetch(`${BASE_URL}/nips`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ nip: String(nipActual), nuevoNip: String(nuevoNip) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(getErrorMessage(res.status, data));
+  return data;
+}
+
 export async function obtenerLlamadas(nip, limite = 100) {
   const params = new URLSearchParams({ nip });
   if (limite !== 100) params.append('limite', limite);

@@ -8,6 +8,7 @@ import FusionarContactos from './tabs/FusionarContactos';
 import TipoContacto from './tabs/TipoContacto';
 import ModificarINPC from './tabs/ModificarINPC';
 import Clientes from './tabs/Clientes';
+import Historial from './tabs/Historial';
 
 const LOGO_URL = 'https://idc.opit.mx/web/image/res.company/1/logo?unique=f3cce4d';
 
@@ -19,6 +20,7 @@ const ALL_TABS = [
   { id: 'tipocontacto', label: 'Tipo Contacto', component: TipoContacto },
   { id: 'inpc', label: 'Modificar INPC', component: ModificarINPC },
   { id: 'clientes', label: 'Modificar/Eliminar NIPs', component: Clientes },
+  { id: 'historial', label: 'Historial', component: Historial },
 ];
 
 export default function Shell() {

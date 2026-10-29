@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useOdooRpc } from '../../hooks/useOdooRpc';
+import { registrarAccion } from '../../services/historialService';
 
 function Alert({ type, message, onClear }) {
   useEffect(() => {
@@ -119,17 +120,43 @@ export default function FusionarContactos() {
       });
 
       const primary = selectedContacts.find(c => c.id === primaryId);
+      const fusionadosIds = allIds.filter(id => id !== primaryId);
       let msg = `Fusión completada. <strong>Contacto principal:</strong> ${primary?.name || 'N/A'} (${primary?.email || 'Sin email'})<br><strong>Contactos fusionados:</strong> ${selectedContacts.length - 1}`;
       if (userCheck.deletedUsers > 0) {
         msg += `<br><strong>Usuarios eliminados:</strong> ${userCheck.deletedUsers}`;
       }
       setAlert({ type: 'success', message: msg });
+
+      registrarAccion({
+        accion: 'FUSIONAR_CONTACTOS',
+        modulo: 'CONTACTOS',
+        resultado: 'EXITO',
+        detalle: {
+          destino: { id: primary?.id, name: primary?.name, email: primary?.email },
+          fusionadosIds,
+          totalFusionados: fusionadosIds.length,
+          usuariosEliminados: userCheck.deletedUsers || 0,
+          busqueda: searchTerm,
+        },
+      });
+
       setSelectedContacts([]);
       setSearchResults([]);
       setPrimaryId(null);
       setSearchTerm('');
     } catch (err) {
       setAlert({ type: 'error', message: `Error en la fusión: ${err.message}` });
+      registrarAccion({
+        accion: 'FUSIONAR_CONTACTOS',
+        modulo: 'CONTACTOS',
+        resultado: 'ERROR',
+        detalle: {
+          destinoId: primaryId,
+          seleccionadosIds: selectedContacts.map(c => c.id),
+          busqueda: searchTerm,
+          error: err.message,
+        },
+      });
     } finally {
       setMerging(false);
     }
