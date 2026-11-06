@@ -73,6 +73,36 @@ export async function cambiarNip(nipActual, nuevoNip) {
   return data;
 }
 
+function throwApiError(res, data) {
+  const msg = data?.error || data?.message || getErrorMessage(res.status, data);
+  const err = new Error(msg);
+  err.status = res.status;
+  err.data = data;
+  throw err;
+}
+
+export async function buscarExterno({ nip, dateStarted, numsus }) {
+  const res = await fetch(`${BASE_URL}/clientes/buscar-externo`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ nip: String(nip), dateStarted, numsus }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throwApiError(res, data);
+  return data;
+}
+
+export async function insertarClienteExterno({ nip, dateStarted, numsus }) {
+  const res = await fetch(`${BASE_URL}/clientes/insertar`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ nip: String(nip), dateStarted, numsus }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throwApiError(res, data);
+  return data;
+}
+
 export async function obtenerLlamadas(nip, limite = 100) {
   const params = new URLSearchParams({ nip });
   if (limite !== 100) params.append('limite', limite);

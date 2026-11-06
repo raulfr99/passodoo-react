@@ -58,7 +58,7 @@ export const CLIENTES_ALLOWED_EMAILS = [
 ];
 
 export const TAB_PERMISSIONS = {
-  admin: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc', 'clientes', 'historial'],
+  admin: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc', 'clientes', 'insertar', 'historial'],
   contacts: ['consulta', 'cambiar', 'crear', 'fusionar', 'tipocontacto', 'inpc'],
   inpc: ['inpc'],
   consulta: ['consulta', 'cambiar', 'crear'],

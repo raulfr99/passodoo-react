@@ -14,6 +14,7 @@ const ACCION_LABELS = {
   GENERAR_NIP: 'Generar NIP',
   EDITAR_NIP: 'Editar NIP',
   ELIMINAR_NIP: 'Eliminar NIP',
+  INSERTAR_NIP: 'Insertar NIP',
   FUSIONAR_CONTACTOS: 'Fusionar contactos',
 };
 
