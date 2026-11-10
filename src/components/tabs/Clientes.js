@@ -178,9 +178,9 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
           <div>
             <SectionTitle>Identificación</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="NIP">
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="number"
                     value={form.NIP}
@@ -192,7 +192,7 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
                     onClick={() => onGenerarNip && onGenerarNip(cliente)}
                     disabled={saving}
                     title="Generar un nuevo NIP automáticamente"
-                    className="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap disabled:opacity-50"
+                    className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap disabled:opacity-50"
                   >
                     Generar nuevo NIP
                   </button>
@@ -207,12 +207,12 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
               <Field label="Núm. Suscripción">
                 <input type="text" value={form.NUMSUS} onChange={set('NUMSUS')} className={INPUT_CLS} />
               </Field>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Field label="Nombre">
                   <input type="text" value={form.NOMSUS} onChange={set('NOMSUS')} className={INPUT_CLS} />
                 </Field>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Field label="Empresa">
                   <input type="text" value={form.NOMEMP} onChange={set('NOMEMP')} className={INPUT_CLS} />
                 </Field>
@@ -222,7 +222,7 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
 
           <div>
             <SectionTitle>Suscripción</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Inicio">
                 <input type="date" value={form.INIPERSUS} onChange={set('INIPERSUS')} className={INPUT_CLS} />
               </Field>
@@ -240,8 +240,8 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
 
           <div>
             <SectionTitle>Contacto</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
                 <Field label="Email">
                   <input type="email" value={form.email} onChange={set('email')} className={INPUT_CLS} />
                 </Field>
@@ -257,13 +257,13 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
 
           <div>
             <SectionTitle>Dirección</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
                 <Field label="Calle">
                   <input type="text" value={form.CALLE} onChange={set('CALLE')} className={INPUT_CLS} />
                 </Field>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Field label="Colonia">
                   <input type="text" value={form.COLONIA} onChange={set('COLONIA')} className={INPUT_CLS} />
                 </Field>
@@ -274,7 +274,7 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
               <Field label="Ciudad">
                 <input type="text" value={form.CIUDAD} onChange={set('CIUDAD')} className={INPUT_CLS} />
               </Field>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Field label="Estado">
                   <input type="text" value={form.ESTADO} onChange={set('ESTADO')} className={INPUT_CLS} />
                 </Field>
@@ -595,45 +595,71 @@ function LlamadasModal({ cliente, onClose }) {
           )}
 
           {!loading && !error && displayed.length > 0 && (
-            <div className="overflow-x-auto -mx-1">
-              <table className="w-full text-sm border-collapse table-fixed min-w-[640px]">
-                <colgroup>
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '22%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '31%' }} />
-                  <col style={{ width: '18%' }} />
-                </colgroup>
-                <thead>
-                  <tr className="border-b-2 border-gray-200">
-                    <SortHeader sortKey="nip" sort={sort} onSort={handleSort}>NIP</SortHeader>
-                    <SortHeader sortKey="usuario" sort={sort} onSort={handleSort}>Usuario</SortHeader>
-                    <SortHeader sortKey="nombre" sort={sort} onSort={handleSort}>Nombre</SortHeader>
-                    <SortHeader sortKey="numConsultas" sort={sort} onSort={handleSort}>No. Consultas</SortHeader>
-                    <SortHeader sortKey="tema" sort={sort} onSort={handleSort}>Tema</SortHeader>
-                    <SortHeader sortKey="fecha" sort={sort} onSort={handleSort}>Fecha y hora</SortHeader>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayed.map((ll) => (
-                    <tr key={ll.id} className="border-b border-gray-100 hover:bg-indigo-50/50 transition-colors">
-                      <td className="py-3 px-3 text-sm font-mono font-bold text-indigo-700">{ll.nip}</td>
-                      <td className="py-3 px-3 text-sm font-medium text-gray-700 truncate">{ll.usuario}</td>
-                      <td className="py-3 px-3 text-sm text-gray-800">{ll.nombre}</td>
-                      <td className="py-3 px-3 text-sm font-semibold text-gray-700 text-center">{ll.numConsultas ?? '-'}</td>
-                      <td className="py-3 px-3">
-                        <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full break-words">{ll.tema}</span>
-                      </td>
-                      <td className="py-3 px-3 text-sm">
-                        <span className="font-semibold text-gray-800">{ll.fecha}</span>
-                        <span className="text-gray-400 ml-1.5">{ll.hora}</span>
-                      </td>
+            <>
+              {/* Mobile cards */}
+              <div className="sm:hidden space-y-2">
+                {displayed.map((ll) => (
+                  <div key={ll.id} className="border border-gray-200 rounded-xl p-3 bg-white space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-mono font-bold text-indigo-700">NIP {ll.nip}</div>
+                        <div className="text-sm text-gray-800 break-words leading-snug">{ll.nombre}</div>
+                        <div className="text-xs text-gray-500 truncate">{ll.usuario}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-xs font-semibold text-gray-700">{ll.fecha}</div>
+                        <div className="text-[11px] text-gray-400">{ll.hora}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full break-words">{ll.tema}</span>
+                      <span className="text-xs text-gray-500">{ll.numConsultas ?? '-'} consulta(s)</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto -mx-1">
+                <table className="w-full text-sm border-collapse table-fixed">
+                  <colgroup>
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '22%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '31%' }} />
+                    <col style={{ width: '18%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b-2 border-gray-200">
+                      <SortHeader sortKey="nip" sort={sort} onSort={handleSort}>NIP</SortHeader>
+                      <SortHeader sortKey="usuario" sort={sort} onSort={handleSort}>Usuario</SortHeader>
+                      <SortHeader sortKey="nombre" sort={sort} onSort={handleSort}>Nombre</SortHeader>
+                      <SortHeader sortKey="numConsultas" sort={sort} onSort={handleSort}>No. Consultas</SortHeader>
+                      <SortHeader sortKey="tema" sort={sort} onSort={handleSort}>Tema</SortHeader>
+                      <SortHeader sortKey="fecha" sort={sort} onSort={handleSort}>Fecha y hora</SortHeader>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {displayed.map((ll) => (
+                      <tr key={ll.id} className="border-b border-gray-100 hover:bg-indigo-50/50 transition-colors">
+                        <td className="py-3 px-3 text-sm font-mono font-bold text-indigo-700">{ll.nip}</td>
+                        <td className="py-3 px-3 text-sm font-medium text-gray-700 truncate">{ll.usuario}</td>
+                        <td className="py-3 px-3 text-sm text-gray-800">{ll.nombre}</td>
+                        <td className="py-3 px-3 text-sm font-semibold text-gray-700 text-center">{ll.numConsultas ?? '-'}</td>
+                        <td className="py-3 px-3">
+                          <span className="inline-block bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full break-words">{ll.tema}</span>
+                        </td>
+                        <td className="py-3 px-3 text-sm">
+                          <span className="font-semibold text-gray-800">{ll.fecha}</span>
+                          <span className="text-gray-400 ml-1.5">{ll.hora}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 
@@ -1460,7 +1486,7 @@ export default function Clientes() {
   return (
     <div className="space-y-4">
       <form onSubmit={handleSearch} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">NIP</label>
             <input
@@ -1503,7 +1529,7 @@ export default function Clientes() {
               className={INPUT_CLS}
             />
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <label className="block text-xs font-medium text-gray-600 mb-1">Ciudad</label>
             <input
               type="text"
@@ -1527,10 +1553,61 @@ export default function Clientes() {
       {alert && <Alert type={alert.type} message={alert.message} onClear={() => setAlert(null)} />}
 
       {results.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-500 mb-2">{results.length} resultado(s)</p>
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm border-collapse min-w-[520px]">
+        <div className="space-y-3">
+          <p className="text-xs text-gray-500">{results.length} resultado(s)</p>
+
+          {/* Mobile cards */}
+          <div className="sm:hidden space-y-2">
+            {results.map((c) => (
+              <div key={c.llaveUnica} className="border border-gray-200 rounded-xl p-3 bg-white space-y-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs text-gray-400 font-mono">NIP {c.nip}</div>
+                    <div className="text-sm font-medium text-gray-800 leading-snug break-words">{c.nombre}</div>
+                    {c.empresa && c.empresa !== c.nombre && (
+                      <div className="text-xs text-gray-500 leading-snug break-words">{c.empresa}</div>
+                    )}
+                  </div>
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
+                      c.estado === 'Activo'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {c.estado || 'Desconocido'}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  <span className="text-gray-400">Fin suscripción:</span> {formatDate(c.finSuscripcion)}
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    onClick={() => setLlamadasTarget(c)}
+                    className="px-2 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition"
+                  >
+                    Llamadas
+                  </button>
+                  <button
+                    onClick={() => setEditTarget(c)}
+                    className="px-2 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium transition"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(c)}
+                    className="px-2 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block">
+            <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="text-left text-xs font-semibold text-gray-500 py-2 px-2">NIP</th>
@@ -1570,7 +1647,7 @@ export default function Clientes() {
                       {formatDate(c.finSuscripcion)}
                     </td>
                     <td className="py-2.5 px-2 text-right">
-                      <div className="flex gap-1.5 justify-end">
+                      <div className="flex gap-1.5 justify-end flex-wrap">
                         <button
                           onClick={() => setLlamadasTarget(c)}
                           className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap"
