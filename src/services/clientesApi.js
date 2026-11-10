@@ -62,14 +62,50 @@ export async function verificarNip(nip) {
   return { exists: true, data: data.data || [] };
 }
 
-export async function cambiarNip(nipActual, nuevoNip) {
+export async function cambiarNip(nipActual, nuevoNip, opts = {}) {
+  const body = { nip: String(nipActual), nuevoNip: String(nuevoNip) };
+  if (opts.actualizarLlamadas) body.actualizarLlamadas = true;
   const res = await fetch(`${BASE_URL}/nips`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ nip: String(nipActual), nuevoNip: String(nuevoNip) }),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(getErrorMessage(res.status, data));
+  return data;
+}
+
+export async function contarLlamadas(nip, limite = 500) {
+  const params = new URLSearchParams({ nip });
+  if (limite) params.append('limite', String(limite));
+  const res = await fetch(`${BASE_URL}/llamadas?${params.toString()}`, {
+    headers: getHeaders(),
+  });
+  if (res.status === 404) return { count: 0, data: [], notFound: true, tabla: null };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.error || data?.message || getErrorMessage(res.status, data));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  const count = typeof data.count === 'number' ? data.count : (data.data?.length ?? 0);
+  return { count, data: data.data || [], tabla: data.tabla ?? null, notFound: false };
+}
+
+export async function notificarCambioNip({ email, nombre, nipAnterior, nipNuevo }) {
+  const res = await fetch(`${BASE_URL}/notificaciones/cambio-nip`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      email,
+      nombre,
+      nipAnterior: String(nipAnterior),
+      nipNuevo: String(nipNuevo),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throwApiError(res, data);
   return data;
 }
 

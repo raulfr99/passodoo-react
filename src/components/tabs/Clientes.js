@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas, verificarNip, cambiarNip } from '../../services/clientesApi';
+import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas, verificarNip, cambiarNip, contarLlamadas, notificarCambioNip } from '../../services/clientesApi';
 import { useOdooRpc } from '../../hooks/useOdooRpc';
 import { registrarAccion, ENTORNO } from '../../services/historialService';
 
@@ -650,6 +650,214 @@ function LlamadasModal({ cliente, onClose }) {
   );
 }
 
+function StepsList({ steps }) {
+  if (!steps || steps.length === 0) return null;
+  const iconFor = (status) => {
+    if (status === 'running') return <Spinner />;
+    if (status === 'ok') return <span className="text-green-600">✅</span>;
+    if (status === 'error') return <span className="text-red-600">❌</span>;
+    if (status === 'info') return <span className="text-blue-600">ℹ️</span>;
+    return <span className="text-gray-300">⏳</span>;
+  };
+  const textCls = (status) => {
+    if (status === 'running') return 'text-gray-800';
+    if (status === 'ok') return 'text-gray-700';
+    if (status === 'error') return 'text-red-700';
+    if (status === 'info') return 'text-blue-700';
+    return 'text-gray-400';
+  };
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+      {steps.map((s) => (
+        <div key={s.key} className="flex items-start gap-2 text-sm">
+          <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">{iconFor(s.status)}</span>
+          <div className={`min-w-0 flex-1 ${textCls(s.status)}`}>
+            <p className="leading-tight">{s.label}</p>
+            {s.note && <p className="text-xs text-gray-500 mt-0.5 break-words">{s.note}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function esEmailValido(e) {
+  return typeof e === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
+}
+
+function extraerDestinatarios(sqlRecords) {
+  const seen = new Map();
+  for (const c of sqlRecords || []) {
+    const rawEmail = c?.contactos?.email || c?.email || c?.EMAIL || '';
+    const email = typeof rawEmail === 'string' ? rawEmail.trim() : '';
+    if (!esEmailValido(email)) continue;
+    const nombre = c?.nombre || c?.empresa || c?.NOMSUS || c?.NOMEMP || email;
+    const llaveUnica = c?.llaveUnica || null;
+    const key = email.toLowerCase();
+    if (!seen.has(key)) seen.set(key, { email, nombre, llaveUnica });
+  }
+  return [...seen.values()];
+}
+
+function NotificacionPanel({ sqlRecords, nipAnterior, nipNuevo, onBusyChange }) {
+  const destinatarios = useMemo(() => extraerDestinatarios(sqlRecords), [sqlRecords]);
+  const [selected, setSelected] = useState(() => {
+    const init = {};
+    const first = extraerDestinatarios(sqlRecords)[0];
+    if (first) init[first.email.toLowerCase()] = true;
+    return init;
+  });
+  const [statuses, setStatuses] = useState({});
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    if (onBusyChange) onBusyChange(enviando);
+  }, [enviando, onBusyChange]);
+
+  if (destinatarios.length === 0) {
+    return (
+      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-600">
+        <p className="font-semibold text-gray-800 mb-1">¿Quieres notificar al cliente?</p>
+        <p className="text-xs">El cliente no tiene correo registrado.</p>
+      </div>
+    );
+  }
+
+  const toggle = (email) => {
+    if (enviando) return;
+    const k = email.toLowerCase();
+    setSelected((prev) => ({ ...prev, [k]: !prev[k] }));
+  };
+
+  const previewNombre = (() => {
+    const first = destinatarios.find((d) => selected[d.email.toLowerCase()]) || destinatarios[0];
+    return first?.nombre || '<nombre>';
+  })();
+
+  const pendientesSeleccionados = destinatarios.filter(
+    (d) => selected[d.email.toLowerCase()] && statuses[d.email.toLowerCase()]?.status !== 'sent'
+  );
+  const haySelecciones = destinatarios.some((d) => selected[d.email.toLowerCase()]);
+  const puedeEnviar = !enviando && pendientesSeleccionados.length > 0;
+  const hayFallidos = destinatarios.some(
+    (d) => selected[d.email.toLowerCase()] && statuses[d.email.toLowerCase()]?.status === 'error'
+  );
+  const todosOk = haySelecciones && destinatarios.every(
+    (d) => !selected[d.email.toLowerCase()] || statuses[d.email.toLowerCase()]?.status === 'sent'
+  );
+
+  const enviar = async () => {
+    if (!puedeEnviar) return;
+    setEnviando(true);
+    for (const d of pendientesSeleccionados) {
+      const k = d.email.toLowerCase();
+      setStatuses((prev) => ({ ...prev, [k]: { status: 'sending' } }));
+      try {
+        const resp = await notificarCambioNip({
+          email: d.email,
+          nombre: d.nombre,
+          nipAnterior,
+          nipNuevo,
+        });
+        const messageId = resp?.detalles?.messageId || null;
+        setStatuses((prev) => ({ ...prev, [k]: { status: 'sent', messageId } }));
+        registrarAccion({
+          accion: 'NOTIFICAR_CAMBIO_NIP',
+          modulo: 'NIPS',
+          resultado: 'EXITO',
+          detalle: {
+            nipAnterior,
+            nipNuevo,
+            emailCliente: d.email,
+            nombre: d.nombre,
+            origenEmail: 'SQL',
+            llaveUnica: d.llaveUnica,
+            messageId,
+          },
+        });
+      } catch (err) {
+        setStatuses((prev) => ({ ...prev, [k]: { status: 'error', error: err.message } }));
+        registrarAccion({
+          accion: 'NOTIFICAR_CAMBIO_NIP',
+          modulo: 'NIPS',
+          resultado: 'ERROR',
+          detalle: {
+            nipAnterior,
+            nipNuevo,
+            emailCliente: d.email,
+            nombre: d.nombre,
+            origenEmail: 'SQL',
+            llaveUnica: d.llaveUnica,
+            error: err.message,
+          },
+        });
+      }
+    }
+    setEnviando(false);
+  };
+
+  const labelBoton = hayFallidos && !enviando ? 'Reintentar fallidos' : 'Enviar correo';
+
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+      <div>
+        <p className="font-semibold text-blue-900 mb-0.5">¿Quieres notificar al cliente?</p>
+        <p className="text-xs text-blue-700">Se usan los correos del registro en la base de datos.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        {destinatarios.map((d) => {
+          const k = d.email.toLowerCase();
+          const st = statuses[k];
+          return (
+            <label
+              key={k}
+              className={`flex items-start gap-2 bg-white border rounded-lg px-3 py-2 text-sm ${
+                enviando ? 'cursor-not-allowed opacity-80' : 'cursor-pointer hover:border-blue-300'
+              } ${st?.status === 'sent' ? 'border-green-200' : st?.status === 'error' ? 'border-red-200' : 'border-gray-200'}`}
+            >
+              <input
+                type="checkbox"
+                checked={!!selected[k]}
+                onChange={() => toggle(d.email)}
+                disabled={enviando || st?.status === 'sent'}
+                className="mt-0.5 flex-shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-800 truncate">{d.nombre}</div>
+                <div className="text-xs text-gray-500 truncate break-all">{d.email}</div>
+                {st?.status === 'sending' && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Spinner /> Enviando...</div>}
+                {st?.status === 'sent' && <div className="text-xs text-green-600 mt-0.5">Enviado</div>}
+                {st?.status === 'error' && <div className="text-xs text-red-600 mt-0.5 break-words">Error: {st.error}</div>}
+              </div>
+            </label>
+          );
+        })}
+      </div>
+
+      <div className="bg-white border border-blue-100 rounded-lg px-3 py-2 text-xs text-gray-700 italic">
+        Hola <span className="not-italic font-medium">{previewNombre}</span>, tu NIP fue actualizado de{' '}
+        <span className="not-italic font-mono font-semibold">{nipAnterior}</span> a{' '}
+        <span className="not-italic font-mono font-semibold">{nipNuevo}</span>. Si crees que esto fue un error o no lo
+        solicitaste, comunícate al 55 4440 2293 o a help@idconline.mx.
+      </div>
+
+      {todosOk && !enviando && (
+        <p className="text-xs text-green-700">Notificaciones enviadas.</p>
+      )}
+
+      <button
+        onClick={enviar}
+        disabled={!puedeEnviar}
+        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded-lg transition flex items-center justify-center gap-2"
+      >
+        {enviando && <Spinner />}
+        {enviando ? 'Enviando...' : labelBoton}
+      </button>
+    </div>
+  );
+}
+
 function generarNipAleatorio(exclude) {
   const buf = new Uint32Array(1);
   // 900000 valores posibles (100000..999999)
@@ -670,9 +878,16 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
   const [nuevoNip, setNuevoNip] = useState(null);
   const [intentos, setIntentos] = useState(0);
   const [sqlPreview, setSqlPreview] = useState({ count: 0 });
+  const [sqlRecords, setSqlRecords] = useState([]);
+  const [llamadasPreview, setLlamadasPreview] = useState({ count: 0, cappedAt500: false });
   const [odooPreview, setOdooPreview] = useState({ actualizar: [], excluidos: [], total: 0 });
   const [sqlResult, setSqlResult] = useState(null);
   const [odooActualizados, setOdooActualizados] = useState([]);
+  const [steps, setSteps] = useState([]);
+  const [notificacionEnviando, setNotificacionEnviando] = useState(false);
+
+  const updateStep = (key, patch) =>
+    setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
   const buildExcluidos = (p) => {
     const motivos = [];
@@ -684,6 +899,7 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
   const verify = async () => {
     setPhase('verifying');
     setErrorMsg(null);
+    setSteps([]);
     try {
       let candidato = null;
       let count = 0;
@@ -698,6 +914,14 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
           args: [[['nip_custom', '=', String(g)]], ['id'], 0],
         });
         if (odooCheck && odooCheck.length > 0) continue;
+        let llamOcupado = false;
+        try {
+          const llam = await contarLlamadas(g, 500);
+          if (llam.count > 0) llamOcupado = true;
+        } catch {
+          llamOcupado = true; // ante error, descarta candidato
+        }
+        if (llamOcupado) continue;
         candidato = g;
         break;
       }
@@ -709,7 +933,7 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
       }
       setNuevoNip(candidato);
 
-      const [sqlData, odooData] = await Promise.all([
+      const [sqlData, odooData, llamActual] = await Promise.all([
         verificarNip(nipActual).catch(() => ({ data: [] })),
         odooCall({
           model: 'res.partner',
@@ -720,6 +944,7 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
             0,
           ],
         }).catch(() => []),
+        contarLlamadas(nipActual, 500).catch(() => ({ count: 0, notFound: true })),
       ]);
 
       const actualizar = [];
@@ -732,7 +957,9 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
         }
       });
 
+      setSqlRecords(sqlData.data || []);
       setSqlPreview({ count: (sqlData.data || []).length });
+      setLlamadasPreview({ count: llamActual.count || 0, cappedAt500: (llamActual.count || 0) === 500 });
       setOdooPreview({ actualizar, excluidos, total: (odooData || []).length });
       setPhase('preview');
     } catch (err) {
@@ -746,73 +973,34 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
   const sqlAfectados = (resp) =>
     resp?.detalles?.registrosAfectados ?? resp?.registrosAfectados ?? resp?.data?.registrosAfectados ?? null;
 
+  const llamadasInfo = (resp) => {
+    const detalles = resp?.detalles || {};
+    return {
+      llamadasActualizadas: detalles.llamadasActualizadas ?? null,
+      sinLlamadas: detalles.sinLlamadas === true,
+      tablaLlamadas: detalles.tablaLlamadas ?? null,
+    };
+  };
+
   const confirmar = async () => {
-    setPhase('confirming');
+    setPhase('executing');
     setErrorMsg(null);
+    const ids = odooPreview.actualizar.map((p) => p.id);
+    const initialSteps = [
+      { key: 'sql', label: 'Actualizando NIP en base de datos...', status: 'running' },
+      { key: 'llamadas', label: 'Moviendo historial de llamadas...', status: 'pending' },
+      { key: 'odoo', label: 'Actualizando NIP en Odoo...', status: 'pending' },
+      { key: 'hist', label: 'Registrando en historial...', status: 'pending' },
+    ];
+    setSteps(initialSteps);
+
+    let sqlResp;
     try {
-      const sqlResp = await cambiarNip(nipActual, nuevoNip);
+      sqlResp = await cambiarNip(nipActual, nuevoNip, { actualizarLlamadas: true });
       setSqlResult(sqlResp);
-      const ids = odooPreview.actualizar.map((p) => p.id);
-
-      const detalleBase = {
-        nipAnterior: nipActual,
-        nipNuevo: nuevoNip,
-        intentos,
-        registrosAfectadosSql: sqlAfectados(sqlResp),
-      };
-
-      if (ids.length === 0) {
-        registrarAccion({
-          accion: 'GENERAR_NIP',
-          modulo: 'NIPS',
-          resultado: 'EXITO',
-          detalle: {
-            ...detalleBase,
-            odoo: { actualizadosIds: [], excluidos: odooPreview.excluidos },
-          },
-        });
-        setOdooActualizados([]);
-        setPhase('success');
-        return;
-      }
-
-      setPhase('odooUpdating');
-      try {
-        await odooCall({
-          model: 'res.partner',
-          method: 'write',
-          args: [ids, { nip_custom: Number(nuevoNip) }],
-        });
-        setOdooActualizados(ids);
-        registrarAccion({
-          accion: 'GENERAR_NIP',
-          modulo: 'NIPS',
-          resultado: 'EXITO',
-          detalle: {
-            ...detalleBase,
-            odoo: { actualizadosIds: ids, excluidos: odooPreview.excluidos },
-          },
-        });
-        setPhase('success');
-      } catch (odooErr) {
-        registrarAccion({
-          accion: 'GENERAR_NIP',
-          modulo: 'NIPS',
-          resultado: 'PARCIAL',
-          detalle: {
-            ...detalleBase,
-            odoo: {
-              actualizadosIds: [],
-              pendientesIds: ids,
-              excluidos: odooPreview.excluidos,
-              error: odooErr.message,
-            },
-          },
-        });
-        setErrorMsg(odooErr.message);
-        setPhase('odooFailed');
-      }
     } catch (sqlErr) {
+      updateStep('sql', { status: 'error', note: sqlErr.message });
+      updateStep('hist', { status: 'running' });
       registrarAccion({
         accion: 'GENERAR_NIP',
         modulo: 'NIPS',
@@ -824,16 +1012,108 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
           error: sqlErr.message,
         },
       });
+      updateStep('hist', { status: 'ok' });
       setErrorMsg(sqlErr.message);
       setPhase('error');
+      return;
+    }
+
+    const registrosAfectados = sqlAfectados(sqlResp);
+    const { llamadasActualizadas, sinLlamadas, tablaLlamadas } = llamadasInfo(sqlResp);
+    updateStep('sql', {
+      status: 'ok',
+      note: registrosAfectados != null ? `${registrosAfectados} registro(s)` : undefined,
+    });
+
+    if (sinLlamadas) {
+      updateStep('llamadas', { status: 'info', note: 'Sin llamadas registradas, no hubo nada que mover' });
+    } else {
+      updateStep('llamadas', {
+        status: 'ok',
+        note: `${llamadasActualizadas ?? 0} llamada(s) movida(s)`,
+      });
+    }
+
+    const detalleBase = {
+      nipAnterior: nipActual,
+      nipNuevo: nuevoNip,
+      intentos,
+      registrosAfectadosSql: registrosAfectados,
+      llamadasActualizadas,
+      sinLlamadas,
+      tablaLlamadas,
+    };
+
+    let actualizadosIds = [];
+    let odooError = null;
+    if (ids.length === 0) {
+      updateStep('odoo', { status: 'info', note: 'Sin partners que cumplan la regla; no se actualiza Odoo' });
+    } else {
+      updateStep('odoo', { status: 'running' });
+      try {
+        await odooCall({
+          model: 'res.partner',
+          method: 'write',
+          args: [ids, { nip_custom: Number(nuevoNip) }],
+        });
+        actualizadosIds = ids;
+        updateStep('odoo', { status: 'ok', note: `${ids.length} contacto(s) actualizados` });
+      } catch (odooErr) {
+        odooError = odooErr.message;
+        updateStep('odoo', { status: 'error', note: odooErr.message });
+      }
+    }
+    setOdooActualizados(actualizadosIds);
+
+    updateStep('hist', { status: 'running' });
+    const esParcial = odooError !== null;
+    registrarAccion({
+      accion: 'GENERAR_NIP',
+      modulo: 'NIPS',
+      resultado: esParcial ? 'PARCIAL' : 'EXITO',
+      detalle: {
+        ...detalleBase,
+        odoo: {
+          actualizadosIds,
+          pendientesIds: esParcial ? ids : [],
+          excluidos: odooPreview.excluidos,
+          ...(odooError ? { error: odooError } : {}),
+        },
+      },
+    });
+    updateStep('hist', { status: 'ok' });
+
+    if (esParcial) {
+      setErrorMsg(odooError);
+      setPhase('odooFailed');
+    } else {
+      setPhase('success');
     }
   };
 
   const reintentarOdoo = async () => {
     const ids = odooPreview.actualizar.map((p) => p.id);
     if (ids.length === 0 || !nuevoNip) return;
-    setPhase('odooUpdating');
+    setPhase('executing');
     setErrorMsg(null);
+    const initialSteps = [
+      { key: 'odoo', label: 'Actualizando NIP en Odoo...', status: 'running' },
+      { key: 'hist', label: 'Registrando en historial...', status: 'pending' },
+    ];
+    setSteps(initialSteps);
+
+    const { llamadasActualizadas, sinLlamadas, tablaLlamadas } = llamadasInfo(sqlResult);
+    const detalleBase = {
+      nipAnterior: nipActual,
+      nipNuevo: nuevoNip,
+      intentos,
+      registrosAfectadosSql: sqlAfectados(sqlResult),
+      llamadasActualizadas,
+      sinLlamadas,
+      tablaLlamadas,
+      reintentoOdoo: true,
+    };
+
     try {
       await odooCall({
         model: 'res.partner',
@@ -841,40 +1121,38 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
         args: [ids, { nip_custom: Number(nuevoNip) }],
       });
       setOdooActualizados(ids);
+      updateStep('odoo', { status: 'ok', note: `${ids.length} contacto(s) actualizados` });
+      updateStep('hist', { status: 'running' });
       registrarAccion({
         accion: 'GENERAR_NIP',
         modulo: 'NIPS',
         resultado: 'EXITO',
         detalle: {
-          nipAnterior: nipActual,
-          nipNuevo: nuevoNip,
-          intentos,
-          registrosAfectadosSql: sqlAfectados(sqlResult),
+          ...detalleBase,
           odoo: { actualizadosIds: ids, excluidos: odooPreview.excluidos },
-          reintentoOdoo: true,
         },
       });
+      updateStep('hist', { status: 'ok' });
       setPhase('success');
     } catch (err) {
+      updateStep('odoo', { status: 'error', note: err.message });
+      updateStep('hist', { status: 'running' });
       registrarAccion({
         accion: 'GENERAR_NIP',
         modulo: 'NIPS',
         resultado: 'PARCIAL',
         detalle: {
-          nipAnterior: nipActual,
-          nipNuevo: nuevoNip,
-          intentos,
-          registrosAfectadosSql: sqlAfectados(sqlResult),
+          ...detalleBase,
           odoo: { actualizadosIds: [], pendientesIds: ids, error: err.message },
-          reintentoOdoo: true,
         },
       });
+      updateStep('hist', { status: 'ok' });
       setErrorMsg(err.message);
       setPhase('odooFailed');
     }
   };
 
-  const busy = phase === 'verifying' || phase === 'confirming' || phase === 'odooUpdating';
+  const busy = phase === 'verifying' || phase === 'executing';
   const envBadge = ENTORNO === 'PROD'
     ? 'bg-red-100 text-red-700 border-red-200'
     : 'bg-amber-100 text-amber-700 border-amber-200';
@@ -925,6 +1203,20 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
                 </div>
               </div>
 
+              <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-cyan-600 uppercase tracking-wide">Historial de llamadas</p>
+                {llamadasPreview.count === 0 ? (
+                  <p className="text-xs text-cyan-800 mt-0.5">Este NIP no tiene llamadas registradas; no hay llamadas que mover.</p>
+                ) : (
+                  <>
+                    <p className="text-cyan-900 font-bold text-lg leading-tight">
+                      {llamadasPreview.cappedAt500 ? '500 o más' : llamadasPreview.count}
+                    </p>
+                    <p className="text-xs text-cyan-800">llamada{llamadasPreview.count !== 1 ? 's' : ''} que se moverán al nuevo NIP</p>
+                  </>
+                )}
+              </div>
+
               {odooPreview.total === 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
                   No se encontraron partners en Odoo con <code>nip_custom = {nipActual}</code>. Solo se actualizará SQL.
@@ -939,26 +1231,18 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
             </>
           )}
 
-          {phase === 'confirming' && (
-            <div className="flex flex-col items-center justify-center py-8 gap-3 text-gray-500">
-              <Spinner />
-              <span className="text-sm">Actualizando SQL...</span>
-            </div>
-          )}
-
-          {phase === 'odooUpdating' && (
-            <div className="flex flex-col items-center justify-center py-8 gap-3 text-gray-500">
-              <Spinner />
-              <span className="text-sm">Actualizando Odoo...</span>
-            </div>
+          {(phase === 'executing' || phase === 'success' || phase === 'odooFailed' || (phase === 'error' && steps.length > 0)) && (
+            <StepsList steps={steps} />
           )}
 
           {phase === 'success' && (
             <>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
-                <p className="font-semibold mb-1">Cambio aplicado correctamente.</p>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800 space-y-1">
+                <p className="font-semibold">{sqlResult?.message || 'Cambio aplicado correctamente.'}</p>
                 <p className="text-xs">
-                  SQL: {sqlAfectados(sqlResult) ?? sqlPreview.count} registro(s) · Odoo: {odooActualizados.length} partner(s) actualizados
+                  NIP actualizado en {sqlAfectados(sqlResult) ?? sqlPreview.count} registro(s) de clientes,{' '}
+                  {llamadasInfo(sqlResult).sinLlamadas ? 0 : (llamadasInfo(sqlResult).llamadasActualizadas ?? 0)} llamada(s) movida(s) y{' '}
+                  {odooActualizados.length} contacto(s) de Odoo.
                   {odooPreview.excluidos.length > 0 && ` · ${odooPreview.excluidos.length} excluidos`}
                 </p>
               </div>
@@ -969,15 +1253,32 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
                 </svg>
                 <span className="font-bold text-green-700">{nuevoNip}</span>
               </div>
+              <NotificacionPanel
+                sqlRecords={sqlRecords}
+                nipAnterior={nipActual}
+                nipNuevo={nuevoNip}
+                onBusyChange={setNotificacionEnviando}
+              />
             </>
           )}
 
           {phase === 'odooFailed' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-2">
-              <p className="font-semibold">SQL actualizado, pero Odoo falló.</p>
-              <p className="text-xs">El NIP ya cambió en SQL ({sqlAfectados(sqlResult) ?? sqlPreview.count} registros). Puedes reintentar la actualización en Odoo.</p>
-              {errorMsg && <p className="text-xs font-mono bg-white/60 rounded px-2 py-1 break-all">{errorMsg}</p>}
-            </div>
+            <>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-2">
+                <p className="font-semibold">SQL actualizado, pero Odoo falló.</p>
+                <p className="text-xs">
+                  El NIP ya cambió en SQL ({sqlAfectados(sqlResult) ?? sqlPreview.count} registros),{' '}
+                  {llamadasInfo(sqlResult).sinLlamadas ? 0 : (llamadasInfo(sqlResult).llamadasActualizadas ?? 0)} llamada(s) movida(s). Puedes reintentar la actualización en Odoo.
+                </p>
+                {errorMsg && <p className="text-xs font-mono bg-white/60 rounded px-2 py-1 break-all">{errorMsg}</p>}
+              </div>
+              <NotificacionPanel
+                sqlRecords={sqlRecords}
+                nipAnterior={nipActual}
+                nipNuevo={nuevoNip}
+                onBusyChange={setNotificacionEnviando}
+              />
+            </>
           )}
 
           {phase === 'error' && (
@@ -1036,13 +1337,16 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
             <>
               <button
                 onClick={() => onSuccess({ nipAnterior: nipActual, nipNuevo: nuevoNip, parcial: true })}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition"
+                disabled={notificacionEnviando}
+                title={notificacionEnviando ? 'Espera a que termine el envío de correo' : undefined}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cerrar
               </button>
               <button
                 onClick={reintentarOdoo}
-                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition"
+                disabled={notificacionEnviando}
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white text-sm font-medium transition"
               >
                 Reintentar actualizar Odoo
               </button>
@@ -1052,13 +1356,15 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
           {phase === 'success' && (
             <button
               onClick={() => onSuccess({ nipAnterior: nipActual, nipNuevo: nuevoNip, parcial: false })}
-              className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition"
+              disabled={notificacionEnviando}
+              title={notificacionEnviando ? 'Espera a que termine el envío de correo' : undefined}
+              className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white text-sm font-medium transition"
             >
-              Listo
+              Cerrar
             </button>
           )}
 
-          {(phase === 'verifying' || phase === 'confirming' || phase === 'odooUpdating') && (
+          {(phase === 'verifying' || phase === 'executing') && (
             <button
               disabled
               className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-400 cursor-not-allowed"
