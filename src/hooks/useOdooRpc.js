@@ -24,7 +24,10 @@ export function useOdooRpc() {
     return data.result;
   };
 
-  const odooCallKw = async ({ model, method, args }) => {
+  const odooCallKw = async ({ model, method, args, kwargs }) => {
+    const rpcArgs = kwargs
+      ? [DB, UID, PASS, model, method, args, kwargs]
+      : [DB, UID, PASS, model, method, args];
     const response = await fetch(`${ODOO_URL}/jsonrpc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -34,7 +37,7 @@ export function useOdooRpc() {
         params: {
           service: 'object',
           method: 'execute_kw',
-          args: [DB, UID, PASS, model, method, args],
+          args: rpcArgs,
         },
         id: Math.floor(Math.random() * 9000) + 1,
       }),

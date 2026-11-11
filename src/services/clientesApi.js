@@ -93,6 +93,22 @@ export async function contarLlamadas(nip, limite = 500) {
   return { count, data: data.data || [], tabla: data.tabla ?? null, notFound: false };
 }
 
+export async function descontarLlamadas({ nip, tema, consultor, numConsultas }) {
+  const res = await fetch(`${BASE_URL}/llamadas/descontar`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      nip: String(nip),
+      tema: String(tema),
+      consultor: String(consultor),
+      numConsultas: Number(numConsultas),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throwApiError(res, data);
+  return data;
+}
+
 export async function notificarCambioNip({ email, nombre, nipAnterior, nipNuevo }) {
   const res = await fetch(`${BASE_URL}/notificaciones/cambio-nip`, {
     method: 'POST',

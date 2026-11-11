@@ -2,6 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { buscarClientes, actualizarCliente, eliminarCliente, obtenerLlamadas, verificarNip, cambiarNip, contarLlamadas, notificarCambioNip } from '../../services/clientesApi';
 import { useOdooRpc } from '../../hooks/useOdooRpc';
 import { registrarAccion, ENTORNO } from '../../services/historialService';
+import { useAuth } from '../../context/AuthContext';
+import { can } from '../../config/permissions';
+import DescontarLlamadasForm from '../common/DescontarLlamadasForm';
 
 const INPUT_CLS =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition';
@@ -60,7 +63,7 @@ function buildForm(c) {
     email: c.contactos?.email ?? '',
     INIPERSUS: c.iniSuscripcion ?? '',
     FINPERSUS: c.finSuscripcion ?? '',
-    STATUS: c.estado === 'Activo' ? '1' : '0',
+    STATUS: c.estado === 'Activo' ? '1' : '2',
     NUMTELE1: c.contactos?.telefono1 ?? '',
     NUMTELE2: c.contactos?.telefono2 ?? '',
     NUMEXT1: c.contactos?.extension1 ?? '',
@@ -93,14 +96,163 @@ function Field({ label, children }) {
   );
 }
 
-function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
+function formatDateDMY(iso) {
+  if (!iso) return '-';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function isActivoVigente(estado, finSuscripcion) {
+  if (estado !== 'Activo') return false;
+  if (!finSuscripcion) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(finSuscripcion + 'T00:00:00');
+  return d.getTime() >= today.getTime();
+}
+
+function diasRestantes(iso) {
+  if (!iso) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(iso + 'T00:00:00');
+  return Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function LlamadasBlock({ total, realizadas }) {
+  const disponibles = total - realizadas;
+  const dispClass =
+    disponibles <= 0
+      ? 'bg-red-50 border-red-200 text-red-900'
+      : disponibles <= 2
+        ? 'bg-amber-50 border-amber-200 text-amber-900'
+        : 'bg-green-50 border-green-200 text-green-900';
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 text-blue-900">
+        <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Total</p>
+        <p className="text-xl sm:text-2xl font-bold leading-tight">{total}</p>
+      </div>
+      <div className="border rounded-xl p-3 bg-gray-50 border-gray-200 text-gray-800">
+        <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Realizadas</p>
+        <p className="text-xl sm:text-2xl font-bold leading-tight">{realizadas}</p>
+      </div>
+      <div className={`border rounded-xl p-3 ${dispClass}`}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Disponibles</p>
+        <p className="text-xl sm:text-2xl font-bold leading-tight">{disponibles}</p>
+      </div>
+    </div>
+  );
+}
+
+function VigenciaBlock({ iniSuscripcion, finSuscripcion, estado }) {
+  const dias = diasRestantes(finSuscripcion);
+  const vigente = isActivoVigente(estado, finSuscripcion);
+  return (
+    <div className="border border-gray-200 rounded-xl p-3 bg-white space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Vigencia</p>
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+          vigente ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+        }`}>
+          {vigente ? 'Activo' : 'Inactivo'}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <p className="text-[11px] text-gray-400 uppercase tracking-wide">Inicio</p>
+          <p className="font-medium text-gray-800">{formatDateDMY(iniSuscripcion)}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-gray-400 uppercase tracking-wide">Fin</p>
+          <p className="font-medium text-gray-800">{formatDateDMY(finSuscripcion)}</p>
+          {dias !== null && (
+            <p className={`text-[11px] ${dias < 0 ? 'text-red-600' : dias <= 7 ? 'text-amber-600' : 'text-gray-500'}`}>
+              {dias < 0 ? `Vencida hace ${Math.abs(dias)} día(s)` : `Faltan ${dias} día(s)`}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DescontarSubModal({ cliente, onClose, onDescuentoOk }) {
+  const total = Number(cliente.totalLlamadas) || 0;
+  const realizadas = Number(cliente.totalRealizadas) || 0;
+  const activoVigente = isActivoVigente(cliente.estado, cliente.finSuscripcion);
+
+  return (
+    <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40">
+      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-xl flex flex-col max-h-[92vh]">
+        <div className="bg-indigo-600 rounded-t-2xl px-5 sm:px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h3 className="font-semibold text-white">Descontar llamadas</h3>
+            <p className="text-xs text-indigo-100 mt-0.5">NIP <span className="font-mono">{cliente.nip}</span> · {cliente.nombre}</p>
+          </div>
+          <button onClick={onClose} className="text-white/80 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition">×</button>
+        </div>
+        <div className="px-5 sm:px-6 py-4 overflow-y-auto">
+          {!activoVigente && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 mb-3">
+              Este registro no está activo. No se pueden descontar llamadas.
+            </div>
+          )}
+          <DescontarLlamadasForm
+            nip={cliente.nip}
+            nombre={cliente.nombre}
+            totnumlla={total}
+            totllarea={realizadas}
+            estado={cliente.estado}
+            finSuscripcion={cliente.finSuscripcion}
+            origen="modal"
+            onSuccess={onDescuentoOk}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) {
+  const { user } = useAuth();
+  const role = user?.role;
+  const canEdit = can(role, 'editarCliente');
+  const canGenerar = can(role, 'generarNip');
+  const canDescontar = can(role, 'descontarLlamadas');
+
+  const [cliente, setCliente] = useState(initialCliente);
   const initial = useMemo(() => buildForm(cliente), [cliente]);
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [showDescontar, setShowDescontar] = useState(false);
+  const [descuentoAplicado, setDescuentoAplicado] = useState(false);
+
+  useEffect(() => {
+    setForm(buildForm(cliente));
+  }, [cliente]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const numericKeys = new Set(['TOTNUMLLA', 'TOTLLAREA', 'frec']);
+
+  const inputCls = (readOnly) =>
+    readOnly ? INPUT_CLS + ' bg-gray-50 text-gray-500 cursor-not-allowed' : INPUT_CLS;
+
+  const handleClose = () => {
+    if (saving) return;
+    onClose(descuentoAplicado);
+  };
+
+  const handleDescuentoOk = (detalles) => {
+    setDescuentoAplicado(true);
+    setCliente((c) => ({
+      ...c,
+      totalRealizadas: detalles?.TOTLLAREA_nuevo ?? c.totalRealizadas,
+      totalLlamadas: detalles?.TOTNUMLLA ?? c.totalLlamadas,
+    }));
+  };
 
   const handleSave = async () => {
     const campos = {};
@@ -154,103 +306,126 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
     }
   };
 
+  const total = Number(cliente.totalLlamadas) || 0;
+  const realizadas = Number(cliente.totalRealizadas) || 0;
+
+  const titulo = canEdit ? 'Editar Cliente' : 'Información del cliente';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
-        <div className="bg-blue-600 rounded-t-2xl px-6 py-4 flex items-center justify-between flex-shrink-0">
-          <h3 className="font-semibold text-white">Editar Cliente</h3>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40">
+      <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-xl flex flex-col max-h-[92vh] sm:max-h-[90vh]">
+        <div className="bg-blue-600 rounded-t-2xl px-5 sm:px-6 py-3 sm:py-4 flex items-center justify-between flex-shrink-0">
+          <h3 className="font-semibold text-white text-base sm:text-lg">{titulo}</h3>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             disabled={saving}
-            className="text-white/80 hover:text-white text-xl leading-none disabled:opacity-50"
+            className="text-white/80 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition disabled:opacity-50"
           >
             ×
           </button>
         </div>
 
-        <div className="px-6 pt-3 flex-shrink-0">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 break-all">
-            <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-1">Llave única</p>
-            <p className="text-sm font-mono font-bold text-blue-800">{cliente.llaveUnica}</p>
+        {/* Hero: NIP grande + acciones */}
+        <div className="px-5 sm:px-6 pt-4 pb-3 flex-shrink-0 border-b border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <div className="flex-shrink-0">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">NIP</p>
+              <p className="text-3xl sm:text-4xl font-bold font-mono text-blue-700 leading-none">{cliente.nip}</p>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:ml-auto">
+              {canDescontar && (
+                <button
+                  onClick={() => setShowDescontar(true)}
+                  disabled={saving}
+                  className="px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-medium transition whitespace-nowrap disabled:opacity-50"
+                >
+                  Descontar llamadas
+                </button>
+              )}
+              {canGenerar && (
+                <button
+                  onClick={() => onGenerarNip && onGenerarNip(cliente)}
+                  disabled={saving}
+                  className="px-3 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs sm:text-sm font-medium transition whitespace-nowrap disabled:opacity-50"
+                >
+                  Generar nuevo NIP
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+        <div className="overflow-y-auto flex-1 px-5 sm:px-6 py-4 space-y-4">
+          <LlamadasBlock total={total} realizadas={realizadas} />
+          <VigenciaBlock
+            iniSuscripcion={cliente.iniSuscripcion}
+            finSuscripcion={cliente.finSuscripcion}
+            estado={cliente.estado}
+          />
+
           <div>
             <SectionTitle>Identificación</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="NIP">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="number"
-                    value={form.NIP}
-                    readOnly
-                    className={INPUT_CLS + ' bg-gray-50 text-gray-400 cursor-not-allowed'}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onGenerarNip && onGenerarNip(cliente)}
-                    disabled={saving}
-                    title="Generar un nuevo NIP automáticamente"
-                    className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap disabled:opacity-50"
-                  >
-                    Generar nuevo NIP
-                  </button>
-                </div>
-              </Field>
               <Field label="Status">
-                <select value={form.STATUS} onChange={set('STATUS')} className={INPUT_CLS + ' bg-white'}>
+                <select
+                  value={form.STATUS}
+                  onChange={set('STATUS')}
+                  disabled={!canEdit}
+                  className={inputCls(!canEdit) + ' bg-white'}
+                >
                   <option value="1">Activo</option>
-                  <option value="0">Inactivo</option>
+                  <option value="2">Inactivo</option>
                 </select>
               </Field>
               <Field label="Núm. Suscripción">
-                <input type="text" value={form.NUMSUS} onChange={set('NUMSUS')} className={INPUT_CLS} />
+                <input type="text" value={form.NUMSUS} onChange={set('NUMSUS')} readOnly={!canEdit} className={inputCls(!canEdit)} />
               </Field>
               <div className="sm:col-span-2">
                 <Field label="Nombre">
-                  <input type="text" value={form.NOMSUS} onChange={set('NOMSUS')} className={INPUT_CLS} />
+                  <input type="text" value={form.NOMSUS} onChange={set('NOMSUS')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
               <div className="sm:col-span-2">
                 <Field label="Empresa">
-                  <input type="text" value={form.NOMEMP} onChange={set('NOMEMP')} className={INPUT_CLS} />
+                  <input type="text" value={form.NOMEMP} onChange={set('NOMEMP')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
             </div>
           </div>
 
-          <div>
-            <SectionTitle>Suscripción</SectionTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Inicio">
-                <input type="date" value={form.INIPERSUS} onChange={set('INIPERSUS')} className={INPUT_CLS} />
-              </Field>
-              <Field label="Fin">
-                <input type="date" value={form.FINPERSUS} onChange={set('FINPERSUS')} className={INPUT_CLS} />
-              </Field>
-              <Field label="Total Llamadas">
-                <input type="number" value={form.TOTNUMLLA} onChange={set('TOTNUMLLA')} className={INPUT_CLS} />
-              </Field>
-              <Field label="Total Realizadas">
-                <input type="number" value={form.TOTLLAREA} onChange={set('TOTLLAREA')} className={INPUT_CLS} />
-              </Field>
+          {canEdit && (
+            <div>
+              <SectionTitle>Suscripción (fechas y totales)</SectionTitle>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Inicio">
+                  <input type="date" value={form.INIPERSUS} onChange={set('INIPERSUS')} className={INPUT_CLS} />
+                </Field>
+                <Field label="Fin">
+                  <input type="date" value={form.FINPERSUS} onChange={set('FINPERSUS')} className={INPUT_CLS} />
+                </Field>
+                <Field label="Total Llamadas">
+                  <input type="number" value={form.TOTNUMLLA} onChange={set('TOTNUMLLA')} className={INPUT_CLS} />
+                </Field>
+                <Field label="Total Realizadas">
+                  <input type="number" value={form.TOTLLAREA} onChange={set('TOTLLAREA')} className={INPUT_CLS} />
+                </Field>
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <SectionTitle>Contacto</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
                 <Field label="Email">
-                  <input type="email" value={form.email} onChange={set('email')} className={INPUT_CLS} />
+                  <input type="email" value={form.email} onChange={set('email')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
               <Field label="Teléfono 1">
-                <input type="text" value={form.NUMTELE1} onChange={set('NUMTELE1')} className={INPUT_CLS} />
+                <input type="text" value={form.NUMTELE1} onChange={set('NUMTELE1')} readOnly={!canEdit} className={inputCls(!canEdit)} />
               </Field>
               <Field label="Teléfono 2">
-                <input type="text" value={form.NUMTELE2} onChange={set('NUMTELE2')} className={INPUT_CLS} />
+                <input type="text" value={form.NUMTELE2} onChange={set('NUMTELE2')} readOnly={!canEdit} className={inputCls(!canEdit)} />
               </Field>
             </div>
           </div>
@@ -260,48 +435,72 @@ function EditModal({ cliente, onClose, onSaved, onGenerarNip }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
                 <Field label="Calle">
-                  <input type="text" value={form.CALLE} onChange={set('CALLE')} className={INPUT_CLS} />
+                  <input type="text" value={form.CALLE} onChange={set('CALLE')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
               <div className="sm:col-span-2">
                 <Field label="Colonia">
-                  <input type="text" value={form.COLONIA} onChange={set('COLONIA')} className={INPUT_CLS} />
+                  <input type="text" value={form.COLONIA} onChange={set('COLONIA')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
               <Field label="Código Postal">
-                <input type="text" value={form.CODPOS} onChange={set('CODPOS')} className={INPUT_CLS} />
+                <input type="text" value={form.CODPOS} onChange={set('CODPOS')} readOnly={!canEdit} className={inputCls(!canEdit)} />
               </Field>
               <Field label="Ciudad">
-                <input type="text" value={form.CIUDAD} onChange={set('CIUDAD')} className={INPUT_CLS} />
+                <input type="text" value={form.CIUDAD} onChange={set('CIUDAD')} readOnly={!canEdit} className={inputCls(!canEdit)} />
               </Field>
               <div className="sm:col-span-2">
                 <Field label="Estado">
-                  <input type="text" value={form.ESTADO} onChange={set('ESTADO')} className={INPUT_CLS} />
+                  <input type="text" value={form.ESTADO} onChange={set('ESTADO')} readOnly={!canEdit} className={inputCls(!canEdit)} />
                 </Field>
               </div>
             </div>
           </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 break-all">
+            <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Llave única</p>
+            <p className="text-xs font-mono font-semibold text-blue-800">{cliente.llaveUnica}</p>
+          </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center gap-3 justify-end flex-shrink-0">
-          {error && <p className="text-sm text-red-600 flex-1">{error}</p>}
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium transition flex items-center gap-2"
-          >
-            {saving && <Spinner />}
-            {saving ? 'Guardando...' : 'Guardar'}
-          </button>
+        <div className="px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex items-center gap-2 justify-end flex-shrink-0 flex-wrap">
+          {error && <p className="text-xs text-red-600 flex-1 min-w-0 break-words">{error}</p>}
+          {canEdit ? (
+            <>
+              <button
+                onClick={handleClose}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium transition flex items-center gap-2"
+              >
+                {saving && <Spinner />}
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleClose}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition"
+            >
+              Cerrar
+            </button>
+          )}
         </div>
       </div>
+
+      {showDescontar && (
+        <DescontarSubModal
+          cliente={cliente}
+          onClose={() => setShowDescontar(false)}
+          onDescuentoOk={handleDescuentoOk}
+        />
+      )}
     </div>
   );
 }
@@ -896,7 +1095,7 @@ function generarNipAleatorio(exclude) {
 }
 
 function GenerarNipModal({ cliente, onClose, onSuccess }) {
-  const { odooCall } = useOdooRpc();
+  const { odooCall, odooCallKw } = useOdooRpc();
   const nipActual = Number(cliente.nip);
 
   const [phase, setPhase] = useState('verifying');
@@ -914,6 +1113,27 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
 
   const updateStep = (key, patch) =>
     setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+
+  const postMensajeOdoo = async (partnerIds, anterior, nuevo) => {
+    const body = `Se cambió el NIP de ${anterior} a ${nuevo}`;
+    const results = await Promise.all(
+      partnerIds.map((id) =>
+        odooCallKw({
+          model: 'res.partner',
+          method: 'message_post',
+          args: [[id]],
+          kwargs: {
+            body,
+            message_type: 'comment',
+            subtype_xmlid: 'mail.mt_comment',
+          },
+        })
+          .then(() => ({ id, ok: true }))
+          .catch((e) => ({ id, ok: false, error: e.message }))
+      )
+    );
+    return results;
+  };
 
   const buildExcluidos = (p) => {
     const motivos = [];
@@ -1016,6 +1236,7 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
       { key: 'sql', label: 'Actualizando NIP en base de datos...', status: 'running' },
       { key: 'llamadas', label: 'Moviendo historial de llamadas...', status: 'pending' },
       { key: 'odoo', label: 'Actualizando NIP en Odoo...', status: 'pending' },
+      { key: 'odooMsg', label: 'Comentando cambio en Odoo...', status: 'pending' },
       { key: 'hist', label: 'Registrando en historial...', status: 'pending' },
     ];
     setSteps(initialSteps);
@@ -1072,8 +1293,10 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
 
     let actualizadosIds = [];
     let odooError = null;
+    let mensajesOdoo = [];
     if (ids.length === 0) {
       updateStep('odoo', { status: 'info', note: 'Sin partners que cumplan la regla; no se actualiza Odoo' });
+      updateStep('odooMsg', { status: 'info', note: 'Sin contactos a comentar' });
     } else {
       updateStep('odoo', { status: 'running' });
       try {
@@ -1084,9 +1307,22 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
         });
         actualizadosIds = ids;
         updateStep('odoo', { status: 'ok', note: `${ids.length} contacto(s) actualizados` });
+
+        updateStep('odooMsg', { status: 'running' });
+        mensajesOdoo = await postMensajeOdoo(ids, nipActual, nuevoNip);
+        const okCount = mensajesOdoo.filter((m) => m.ok).length;
+        const failCount = mensajesOdoo.length - okCount;
+        if (failCount === 0) {
+          updateStep('odooMsg', { status: 'ok', note: `${okCount} comentario(s) publicados` });
+        } else if (okCount === 0) {
+          updateStep('odooMsg', { status: 'error', note: `No se pudo comentar en Odoo (${mensajesOdoo[0]?.error || 'error'})` });
+        } else {
+          updateStep('odooMsg', { status: 'info', note: `${okCount} publicados · ${failCount} fallidos` });
+        }
       } catch (odooErr) {
         odooError = odooErr.message;
         updateStep('odoo', { status: 'error', note: odooErr.message });
+        updateStep('odooMsg', { status: 'pending', note: 'No se intentó: falló el write' });
       }
     }
     setOdooActualizados(actualizadosIds);
@@ -1103,6 +1339,12 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
           actualizadosIds,
           pendientesIds: esParcial ? ids : [],
           excluidos: odooPreview.excluidos,
+          mensajesPublicados: mensajesOdoo
+            .filter((m) => m.ok)
+            .map((m) => m.id),
+          mensajesFallidos: mensajesOdoo
+            .filter((m) => !m.ok)
+            .map((m) => ({ id: m.id, error: m.error })),
           ...(odooError ? { error: odooError } : {}),
         },
       },
@@ -1124,6 +1366,7 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
     setErrorMsg(null);
     const initialSteps = [
       { key: 'odoo', label: 'Actualizando NIP en Odoo...', status: 'running' },
+      { key: 'odooMsg', label: 'Comentando cambio en Odoo...', status: 'pending' },
       { key: 'hist', label: 'Registrando en historial...', status: 'pending' },
     ];
     setSteps(initialSteps);
@@ -1148,6 +1391,19 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
       });
       setOdooActualizados(ids);
       updateStep('odoo', { status: 'ok', note: `${ids.length} contacto(s) actualizados` });
+
+      updateStep('odooMsg', { status: 'running' });
+      const mensajesOdoo = await postMensajeOdoo(ids, nipActual, nuevoNip);
+      const okCount = mensajesOdoo.filter((m) => m.ok).length;
+      const failCount = mensajesOdoo.length - okCount;
+      if (failCount === 0) {
+        updateStep('odooMsg', { status: 'ok', note: `${okCount} comentario(s) publicados` });
+      } else if (okCount === 0) {
+        updateStep('odooMsg', { status: 'error', note: `No se pudo comentar en Odoo (${mensajesOdoo[0]?.error || 'error'})` });
+      } else {
+        updateStep('odooMsg', { status: 'info', note: `${okCount} publicados · ${failCount} fallidos` });
+      }
+
       updateStep('hist', { status: 'running' });
       registrarAccion({
         accion: 'GENERAR_NIP',
@@ -1155,13 +1411,19 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
         resultado: 'EXITO',
         detalle: {
           ...detalleBase,
-          odoo: { actualizadosIds: ids, excluidos: odooPreview.excluidos },
+          odoo: {
+            actualizadosIds: ids,
+            excluidos: odooPreview.excluidos,
+            mensajesPublicados: mensajesOdoo.filter((m) => m.ok).map((m) => m.id),
+            mensajesFallidos: mensajesOdoo.filter((m) => !m.ok).map((m) => ({ id: m.id, error: m.error })),
+          },
         },
       });
       updateStep('hist', { status: 'ok' });
       setPhase('success');
     } catch (err) {
       updateStep('odoo', { status: 'error', note: err.message });
+      updateStep('odooMsg', { status: 'pending', note: 'No se intentó: falló el write' });
       updateStep('hist', { status: 'running' });
       registrarAccion({
         accion: 'GENERAR_NIP',
@@ -1405,6 +1667,12 @@ function GenerarNipModal({ cliente, onClose, onSuccess }) {
 }
 
 export default function Clientes() {
+  const { user } = useAuth();
+  const role = user?.role;
+  const canEditar = can(role, 'editarCliente');
+  const canEliminar = can(role, 'eliminarCliente');
+  const canVerLlamadas = can(role, 'verLlamadas');
+
   const [filters, setFilters] = useState({ nip: '', nombre: '', empresa: '', ciudad: '', status: '' });
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
@@ -1581,25 +1849,29 @@ export default function Clientes() {
                 <div className="text-xs text-gray-500">
                   <span className="text-gray-400">Fin suscripción:</span> {formatDate(c.finSuscripcion)}
                 </div>
-                <div className="grid grid-cols-3 gap-1.5 pt-1">
-                  <button
-                    onClick={() => setLlamadasTarget(c)}
-                    className="px-2 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition"
-                  >
-                    Llamadas
-                  </button>
+                <div className={`grid gap-1.5 pt-1 ${canEliminar ? 'grid-cols-3' : canEditar ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                  {canVerLlamadas && (
+                    <button
+                      onClick={() => setLlamadasTarget(c)}
+                      className="px-2 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition"
+                    >
+                      Llamadas
+                    </button>
+                  )}
                   <button
                     onClick={() => setEditTarget(c)}
                     className="px-2 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium transition"
                   >
-                    Editar
+                    {canEditar ? 'Editar' : 'Ver'}
                   </button>
-                  <button
-                    onClick={() => setDeleteTarget(c)}
-                    className="px-2 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition"
-                  >
-                    Eliminar
-                  </button>
+                  {canEliminar && (
+                    <button
+                      onClick={() => setDeleteTarget(c)}
+                      className="px-2 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition"
+                    >
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -1648,24 +1920,28 @@ export default function Clientes() {
                     </td>
                     <td className="py-2.5 px-2 text-right">
                       <div className="flex gap-1.5 justify-end flex-wrap">
-                        <button
-                          onClick={() => setLlamadasTarget(c)}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap"
-                        >
-                          Ver llamadas
-                        </button>
+                        {canVerLlamadas && (
+                          <button
+                            onClick={() => setLlamadasTarget(c)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium transition whitespace-nowrap"
+                          >
+                            Ver llamadas
+                          </button>
+                        )}
                         <button
                           onClick={() => setEditTarget(c)}
                           className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium transition whitespace-nowrap"
                         >
-                          Editar
+                          {canEditar ? 'Editar' : 'Ver'}
                         </button>
-                        <button
-                          onClick={() => setDeleteTarget(c)}
-                          className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition whitespace-nowrap"
-                        >
-                          Eliminar
-                        </button>
+                        {canEliminar && (
+                          <button
+                            onClick={() => setDeleteTarget(c)}
+                            className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition whitespace-nowrap"
+                          >
+                            Eliminar
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1683,7 +1959,12 @@ export default function Clientes() {
       {editTarget && (
         <EditModal
           cliente={editTarget}
-          onClose={() => setEditTarget(null)}
+          onClose={(descuentoAplicado) => {
+            setEditTarget(null);
+            if (descuentoAplicado && Object.values(filters).some((v) => v !== '')) {
+              doSearch(filters);
+            }
+          }}
           onSaved={handleSaved}
           onGenerarNip={handleGenerarRequest}
         />

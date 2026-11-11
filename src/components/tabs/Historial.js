@@ -13,7 +13,10 @@ const RESULTADO_STYLES = {
 const MODULO_STYLES = {
   NIPS: 'bg-blue-100 text-blue-700',
   CONTACTOS: 'bg-indigo-100 text-indigo-700',
+  LLAMADAS: 'bg-cyan-100 text-cyan-700',
 };
+
+const MODULOS_TODOS = ['NIPS', 'CONTACTOS', 'LLAMADAS'];
 
 const ACCION_LABELS = {
   GENERAR_NIP: 'Generar NIP',
@@ -22,6 +25,7 @@ const ACCION_LABELS = {
   INSERTAR_NIP: 'Insertar NIP',
   NOTIFICAR_CAMBIO_NIP: 'Notificación al cliente',
   FUSIONAR_CONTACTOS: 'Fusionar contactos',
+  DESCONTAR_LLAMADAS: 'Descontar llamadas',
 };
 
 function Spinner({ size = 'h-4 w-4' }) {
@@ -79,10 +83,11 @@ export default function Historial() {
   const [filters, setFilters] = useState({ modulo: '', email: '', entorno: '' });
   const [applied, setApplied] = useState({ modulo: '', email: '' });
   const [registros, setRegistros] = useState([]);
-  const [nextKeys, setNextKeys] = useState({ NIPS: null, CONTACTOS: null, single: null });
+  const [nextKeys, setNextKeys] = useState({ NIPS: null, CONTACTOS: null, LLAMADAS: null, single: null });
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [warning, setWarning] = useState(null);
   const [detalle, setDetalle] = useState(null);
   const [mode, setMode] = useState('both');
 
@@ -100,33 +105,50 @@ export default function Historial() {
 
   const load = useCallback(async ({ modulo, email, reset }) => {
     setError(null);
+    setWarning(null);
     if (reset) setLoading(true); else setLoadingMore(true);
     try {
       if (email) {
         const resp = await consultarHistorial({ email, modulo: modulo || undefined, lastKey: reset ? null : nextKeys.single });
         const nuevos = resp.data || [];
         setRegistros((prev) => sortDesc(dedupe(reset ? nuevos : [...prev, ...nuevos])));
-        setNextKeys({ NIPS: null, CONTACTOS: null, single: resp.nextKey || null });
+        setNextKeys({ NIPS: null, CONTACTOS: null, LLAMADAS: null, single: resp.nextKey || null });
         setMode('single');
       } else if (modulo) {
         const resp = await consultarHistorial({ modulo, lastKey: reset ? null : nextKeys.single });
         const nuevos = resp.data || [];
         setRegistros((prev) => sortDesc(dedupe(reset ? nuevos : [...prev, ...nuevos])));
-        setNextKeys({ NIPS: null, CONTACTOS: null, single: resp.nextKey || null });
+        setNextKeys({ NIPS: null, CONTACTOS: null, LLAMADAS: null, single: resp.nextKey || null });
         setMode('single');
       } else {
-        const curNips = reset ? null : nextKeys.NIPS;
-        const curCon = reset ? null : nextKeys.CONTACTOS;
-        const fetches = [];
-        if (reset || curNips) fetches.push(consultarHistorial({ modulo: 'NIPS', lastKey: curNips }).then((r) => ({ k: 'NIPS', r })));
-        if (reset || curCon) fetches.push(consultarHistorial({ modulo: 'CONTACTOS', lastKey: curCon }).then((r) => ({ k: 'CONTACTOS', r })));
+        const currentKeys = {
+          NIPS: reset ? null : nextKeys.NIPS,
+          CONTACTOS: reset ? null : nextKeys.CONTACTOS,
+          LLAMADAS: reset ? null : nextKeys.LLAMADAS,
+        };
+        const fetches = MODULOS_TODOS
+          .filter((m) => reset || currentKeys[m])
+          .map((m) =>
+            consultarHistorial({ modulo: m, lastKey: currentKeys[m] })
+              .then((r) => ({ k: m, r, error: null }))
+              .catch((e) => ({ k: m, r: null, error: e.message }))
+          );
         const results = await Promise.all(fetches);
-        const nuevos = results.flatMap((x) => x.r.data || []);
+        const errored = results.filter((x) => x.error);
+        if (errored.length === results.length && results.length > 0) {
+          throw new Error(errored[0].error);
+        }
+        const nuevos = results.flatMap((x) => x.r?.data || []);
         setRegistros((prev) => sortDesc(dedupe(reset ? nuevos : [...prev, ...nuevos])));
-        const newKeys = { NIPS: reset ? null : curNips, CONTACTOS: reset ? null : curCon, single: null };
-        results.forEach((x) => { newKeys[x.k] = x.r.nextKey || null; });
+        const newKeys = { ...currentKeys, single: null };
+        results.forEach((x) => {
+          if (x.r) newKeys[x.k] = x.r.nextKey || null;
+        });
         setNextKeys(newKeys);
         setMode('both');
+        if (errored.length > 0) {
+          setWarning(`No se pudo cargar: ${errored.map((e) => e.k).join(', ')}. ${errored[0].error}`);
+        }
       }
     } catch (err) {
       setError(err.message);
@@ -157,7 +179,9 @@ export default function Historial() {
     load({ ...applied, reset: false });
   };
 
-  const canLoadMore = mode === 'single' ? !!nextKeys.single : !!(nextKeys.NIPS || nextKeys.CONTACTOS);
+  const canLoadMore = mode === 'single'
+    ? !!nextKeys.single
+    : !!(nextKeys.NIPS || nextKeys.CONTACTOS || nextKeys.LLAMADAS);
 
   const displayed = useMemo(() => {
     let list = registros;
@@ -178,6 +202,7 @@ export default function Historial() {
               <option value="">Todos</option>
               <option value="NIPS">NIPS</option>
               <option value="CONTACTOS">CONTACTOS</option>
+              <option value="LLAMADAS">LLAMADAS</option>
             </select>
           </div>
           <div>
@@ -225,6 +250,11 @@ export default function Historial() {
             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
           </svg>
           <span className="break-words">{error}</span>
+        </div>
+      )}
+      {warning && (
+        <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-3 text-xs text-amber-800 break-words">
+          {warning}
         </div>
       )}
 
