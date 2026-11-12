@@ -61,12 +61,27 @@ function MetricCard({ label, value, color }) {
   );
 }
 
-function RegistroActivoCard({ c, onLlamadasChange }) {
+function InfoRow({ label, value }) {
+  if (value === null || value === undefined || value === '') return null;
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] text-gray-400 uppercase tracking-wide">{label}</p>
+      <p className="text-sm font-medium text-gray-800 break-words">{value}</p>
+    </div>
+  );
+}
+
+function RegistroActivoCard({ c }) {
   const total = Number(c.totalLlamadas) || 0;
   const realizadas = Number(c.totalRealizadas) || 0;
   const disponibles = total - realizadas;
   const dispColor = disponibles <= 0 ? 'red' : disponibles <= 2 ? 'amber' : 'green';
   const dias = diasRestantes(c.finSuscripcion);
+
+  const email = c.contactos?.email;
+  const tel1 = c.contactos?.telefono1;
+  const tel2 = c.contactos?.telefono2;
+  const telefonos = [tel1, tel2].filter((t) => t).join(' / ') || null;
 
   return (
     <div className="border-2 border-indigo-200 bg-indigo-50/40 rounded-2xl p-4 space-y-4">
@@ -102,6 +117,21 @@ function RegistroActivoCard({ c, onLlamadasChange }) {
           )}
         </div>
       </div>
+
+      {(c.numSuscripcion || c.empresa || email || telefonos || c.producto) && (
+        <div className="bg-white border border-gray-200 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2">
+          <InfoRow label="Núm. Suscripción" value={c.numSuscripcion} />
+          <InfoRow label="Empresa" value={c.empresa} />
+          <InfoRow label="Email" value={email} />
+          <InfoRow label="Teléfono" value={telefonos} />
+          {c.producto && (
+            <div className="sm:col-span-2">
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide">Producto</p>
+              <p className="text-sm font-medium text-gray-800 break-words">{c.producto}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -241,7 +271,7 @@ export default function DescontarLlamadas() {
 
       {registroActivo && (
         <>
-          <RegistroActivoCard c={registroActivo} onLlamadasChange={handleDescuentoOk} />
+          <RegistroActivoCard c={registroActivo} />
           <DescontarLlamadasForm
             nip={nipInput.trim()}
             nombre={registroActivo.nombre}

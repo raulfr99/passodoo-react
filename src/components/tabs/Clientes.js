@@ -219,8 +219,10 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
   const { user } = useAuth();
   const role = user?.role;
   const canEdit = can(role, 'editarCliente');
+  const canEditarContadores = can(role, 'editarContadoresLlamadas', user?.email);
   const canGenerar = can(role, 'generarNip');
   const canDescontar = can(role, 'descontarLlamadas');
+  const puedeGuardar = canEdit || canEditarContadores;
 
   const [cliente, setCliente] = useState(initialCliente);
   const initial = useMemo(() => buildForm(cliente), [cliente]);
@@ -254,6 +256,32 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
     }));
   };
 
+  const validarContadores = (campos) => {
+    const toInt = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return Number.isInteger(n) ? n : NaN;
+    };
+    const finalNum = 'TOTNUMLLA' in campos ? toInt(campos.TOTNUMLLA) : toInt(initial.TOTNUMLLA);
+    const finalReal = 'TOTLLAREA' in campos ? toInt(campos.TOTLLAREA) : toInt(initial.TOTLLAREA);
+    if ('TOTNUMLLA' in campos) {
+      if (finalNum === null || Number.isNaN(finalNum) || finalNum < 0) {
+        return 'Total de llamadas debe ser un entero mayor o igual a 0.';
+      }
+    }
+    if ('TOTLLAREA' in campos) {
+      if (finalReal === null || Number.isNaN(finalReal) || finalReal < 0) {
+        return 'Total realizadas debe ser un entero mayor o igual a 0.';
+      }
+    }
+    if (finalNum !== null && finalReal !== null && !Number.isNaN(finalNum) && !Number.isNaN(finalReal)) {
+      if (finalReal > finalNum) {
+        return 'Total realizadas no puede ser mayor que el total de llamadas.';
+      }
+    }
+    return null;
+  };
+
   const handleSave = async () => {
     const campos = {};
     Object.keys(initial).forEach((key) => {
@@ -268,10 +296,37 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
       }
     });
 
+    // Consultor con permiso de contadores: solo puede enviar TOTNUMLLA/TOTLLAREA
+    if (!canEdit && canEditarContadores) {
+      Object.keys(campos).forEach((k) => {
+        if (k !== 'TOTNUMLLA' && k !== 'TOTLLAREA') delete campos[k];
+      });
+    }
+
     if (Object.keys(campos).length === 0) {
       setError('Sin cambios para guardar.');
       return;
     }
+
+    const errContadores = validarContadores(campos);
+    if (errContadores) {
+      setError(errContadores);
+      return;
+    }
+
+    const contadoresAnterior = {};
+    const contadoresNuevo = {};
+    if ('TOTNUMLLA' in campos) {
+      contadoresAnterior.TOTNUMLLA = initial.TOTNUMLLA === '' ? null : Number(initial.TOTNUMLLA);
+      contadoresNuevo.TOTNUMLLA = campos.TOTNUMLLA;
+    }
+    if ('TOTLLAREA' in campos) {
+      contadoresAnterior.TOTLLAREA = initial.TOTLLAREA === '' ? null : Number(initial.TOTLLAREA);
+      contadoresNuevo.TOTLLAREA = campos.TOTLLAREA;
+    }
+    const detalleContadores = Object.keys(contadoresAnterior).length > 0
+      ? { contadoresAnterior, contadoresNuevo }
+      : {};
 
     setSaving(true);
     setError(null);
@@ -286,6 +341,7 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
           llaveUnica: cliente.llaveUnica,
           nip: cliente.nip,
           camposModificados: campos,
+          ...detalleContadores,
         },
       });
       onSaved(updated);
@@ -298,6 +354,7 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
           llaveUnica: cliente.llaveUnica,
           nip: cliente.nip,
           camposIntentados: campos,
+          ...detalleContadores,
           error: err.message,
         },
       });
@@ -393,21 +450,47 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
             </div>
           </div>
 
-          {canEdit && (
+          {(canEdit || canEditarContadores) && (
             <div>
               <SectionTitle>Suscripción (fechas y totales)</SectionTitle>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Inicio">
-                  <input type="date" value={form.INIPERSUS} onChange={set('INIPERSUS')} className={INPUT_CLS} />
+                  <input
+                    type="date"
+                    value={form.INIPERSUS}
+                    onChange={set('INIPERSUS')}
+                    readOnly={!canEdit}
+                    className={inputCls(!canEdit)}
+                  />
                 </Field>
                 <Field label="Fin">
-                  <input type="date" value={form.FINPERSUS} onChange={set('FINPERSUS')} className={INPUT_CLS} />
+                  <input
+                    type="date"
+                    value={form.FINPERSUS}
+                    onChange={set('FINPERSUS')}
+                    readOnly={!canEdit}
+                    className={inputCls(!canEdit)}
+                  />
                 </Field>
                 <Field label="Total Llamadas">
-                  <input type="number" value={form.TOTNUMLLA} onChange={set('TOTNUMLLA')} className={INPUT_CLS} />
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.TOTNUMLLA}
+                    onChange={set('TOTNUMLLA')}
+                    className={INPUT_CLS}
+                  />
                 </Field>
                 <Field label="Total Realizadas">
-                  <input type="number" value={form.TOTLLAREA} onChange={set('TOTLLAREA')} className={INPUT_CLS} />
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.TOTLLAREA}
+                    onChange={set('TOTLLAREA')}
+                    className={INPUT_CLS}
+                  />
                 </Field>
               </div>
             </div>
@@ -465,7 +548,7 @@ function EditModal({ cliente: initialCliente, onClose, onSaved, onGenerarNip }) 
 
         <div className="px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex items-center gap-2 justify-end flex-shrink-0 flex-wrap">
           {error && <p className="text-xs text-red-600 flex-1 min-w-0 break-words">{error}</p>}
-          {canEdit ? (
+          {puedeGuardar ? (
             <>
               <button
                 onClick={handleClose}
@@ -1673,7 +1756,17 @@ export default function Clientes() {
   const canEliminar = can(role, 'eliminarCliente');
   const canVerLlamadas = can(role, 'verLlamadas');
 
-  const [filters, setFilters] = useState({ nip: '', nombre: '', empresa: '', ciudad: '', status: '' });
+  const [filters, setFilters] = useState({
+    nip: '',
+    nombre: '',
+    empresa: '',
+    ciudad: '',
+    status: '',
+    email: '',
+    telefono: '',
+    codpos: '',
+    numsus: '',
+  });
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1797,13 +1890,55 @@ export default function Clientes() {
               className={INPUT_CLS}
             />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Ciudad</label>
             <input
               type="text"
               value={filters.ciudad}
               onChange={setFilter('ciudad')}
-              placeholder="Búsqueda parcial"
+              placeholder="Parcial"
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Código Postal</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={filters.codpos}
+              onChange={setFilter('codpos')}
+              placeholder="C.P. (exacto)"
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Núm. Suscripción</label>
+            <input
+              type="text"
+              value={filters.numsus}
+              onChange={setFilter('numsus')}
+              placeholder="Exacto"
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+            <input
+              type="text"
+              value={filters.email}
+              onChange={setFilter('email')}
+              placeholder="Parcial"
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Teléfono</label>
+            <input
+              type="text"
+              inputMode="tel"
+              value={filters.telefono}
+              onChange={setFilter('telefono')}
+              placeholder="Parcial (solo dígitos)"
               className={INPUT_CLS}
             />
           </div>

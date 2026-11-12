@@ -44,6 +44,7 @@ const CAPABILITIES = {
   admin: new Set([
     'verClientes',
     'editarCliente',
+    'editarContadoresLlamadas',
     'eliminarCliente',
     'generarNip',
     'fusionarContactos',
@@ -56,6 +57,7 @@ const CAPABILITIES = {
   full: new Set([
     'verClientes',
     'editarCliente',
+    'editarContadoresLlamadas',
     'eliminarCliente',
     'generarNip',
     'fusionarContactos',
@@ -71,6 +73,10 @@ const CAPABILITIES = {
   ]),
 };
 
+const CONSULTORES_CON_CONTADORES = [
+  'fbrito@idconline.mx',
+];
+
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
@@ -84,7 +90,13 @@ export function getUserRole(email) {
   return null;
 }
 
-export function can(role, capability) {
+export function can(role, capability, email) {
+  if (
+    capability === 'editarContadoresLlamadas' &&
+    CONSULTORES_CON_CONTADORES.includes(normalizeEmail(email))
+  ) {
+    return true;
+  }
   const caps = CAPABILITIES[role];
   return !!caps && caps.has(capability);
 }
