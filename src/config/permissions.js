@@ -9,6 +9,7 @@ const FULL_ACCESS_USERS = [
   'racosta@idconline.mx',
   'gustavo.vidal@idconline.mx',
   'karen.gonzalez@idconline.mx',
+  'venta_online@idconline.mx'
 ];
 
 const CONSULTORES = [
